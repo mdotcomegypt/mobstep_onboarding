@@ -90,14 +90,25 @@ On the server:
 cd /opt/mobstep_onboarding
 cp .env.example .env && $EDITOR .env       # fill in everything
 mkdir -p .secrets && chmod 700 .secrets    # put vertex-sa.json here, chmod 600
+
+# Uploaded menu photos and logos live here. It must be writable by the service
+# user and inside the unit's ReadWritePaths, or the process refuses to start.
+mkdir -p uploads && chown www-data uploads && chmod 750 uploads
+
 pnpm install --prod --filter ./server
-pnpm migrate
-pnpm preflight                             # must be 6/6 before going further
+pnpm migrate                               # re-run after EVERY deploy
+pnpm preflight                             # must be 8/8 before going further
 ```
 
-`pnpm preflight` checks Postgres, the migrations, the tables, the Drupal secret,
-the WhatsApp template (and reports which language code it is actually registered
-under) and a live Vertex round-trip. Every failure names its own fix.
+**`pnpm migrate` is not a one-time step.** New migrations ship with the code, and
+a deploy that skips it leaves tables missing — which surfaces as a 500 from the
+feature that needed them, nowhere near the cause. `pnpm preflight` checks every
+table by name for exactly that reason.
+
+`pnpm preflight` checks Postgres, the migrations, every expected table by name,
+the upload directory's writability, the Drupal secret, the WhatsApp template
+(and reports which language code it is actually registered under) and a live
+Vertex round-trip. Every failure names its own fix.
 
 Then:
 

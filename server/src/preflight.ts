@@ -43,12 +43,18 @@ await record("Onboarding tables", async () => {
   const required = [
     "onboarding_assets", "onboarding_events", "onboarding_facts",
     "onboarding_messages", "onboarding_otp", "onboarding_sessions",
-    "onboarding_used_tokens",
+    "onboarding_uploads", "onboarding_used_tokens",
   ];
   const present = new Set(rows.map((r) => r.table_name));
   const missing = required.filter((t) => !present.has(t));
   if (missing.length) throw new Error(`missing: ${missing.join(", ")}`);
   return `${required.length} present`;
+});
+
+await record("Upload directory", async () => {
+  const { assertUploadDirWritable } = await import("./lib/uploads.ts");
+  await assertUploadDirWritable();
+  return `${env.uploadDir} writable`;
 });
 
 await record("Drupal reachable", async () => {

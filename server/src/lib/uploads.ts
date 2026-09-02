@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { one, query } from "../db/index.ts";
 import { env } from "./env.ts";
@@ -34,6 +34,45 @@ export interface Upload {
 }
 
 export class UploadError extends Error {}
+
+/**
+ * A failure the operator has to fix, distinguished from a bad file the user
+ * sent. The two need completely different messages: one says "try a PNG", the
+ * other says "run the migration".
+ */
+export class StorageError extends Error {
+  readonly hint: string;
+
+  constructor(message: string, hint: string) {
+    super(message);
+    this.hint = hint;
+  }
+}
+
+/**
+ * Confirms the upload directory exists and is writable.
+ *
+ * Called at boot so a misconfigured deployment fails immediately rather than at
+ * the first photo a store owner sends. Under systemd, ProtectSystem=strict
+ * makes everything outside ReadWritePaths read-only, so an UPLOAD_DIR outside
+ * /opt/mobstep_onboarding fails here with EROFS.
+ */
+export async function assertUploadDirWritable(): Promise<void> {
+  try {
+    await mkdir(env.uploadDir, { recursive: true });
+    const probe = join(env.uploadDir, `.probe-${process.pid}`);
+    await writeFile(probe, "ok");
+    await rm(probe, { force: true });
+  } catch (error) {
+    const code = (error as { code?: string }).code ?? "unknown";
+    throw new Error(
+      `UPLOAD_DIR (${env.uploadDir}) is not writable [${code}]. ` +
+        "Create it and give it to the service user, e.g. " +
+        `mkdir -p ${env.uploadDir} && chown www-data ${env.uploadDir}. ` +
+        "Under systemd it must also sit inside a ReadWritePaths entry.",
+    );
+  }
+}
 
 /**
  * Identifies the file by content.
@@ -72,16 +111,37 @@ export async function storeUpload(
   const { mime, ext } = sniff(buffer);
   const id = randomBytes(32).toString("hex");
 
-  await mkdir(env.uploadDir, { recursive: true });
-  await writeFile(pathFor(id, ext), buffer, { mode: 0o640 });
+  try {
+    await mkdir(env.uploadDir, { recursive: true });
+    await writeFile(pathFor(id, ext), buffer, { mode: 0o640 });
+  } catch (error) {
+    const code = (error as { code?: string }).code ?? "unknown";
+    throw new StorageError(
+      `Cannot write to UPLOAD_DIR (${env.uploadDir}): ${code}`,
+      "The upload directory is not writable by the service.",
+    );
+  }
 
   // The extension is derived from the sniffed type, never from the uploaded
   // name, so a crafted filename cannot decide what lands on disk.
-  await query(
-    `INSERT INTO onboarding_uploads (id, session_id, filename, mime, bytes, kind)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, sessionId, filename.slice(0, 200), mime, buffer.length, kind],
-  );
+  try {
+    await query(
+      `INSERT INTO onboarding_uploads (id, session_id, filename, mime, bytes, kind)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, sessionId, filename.slice(0, 200), mime, buffer.length, kind],
+    );
+  } catch (error) {
+    // 42P01 = undefined_table. The overwhelmingly likely cause is a deploy
+    // that predates 003_uploads.sql, which is invisible from the browser and
+    // looks exactly like a server bug.
+    if ((error as { code?: string }).code === "42P01") {
+      throw new StorageError(
+        "onboarding_uploads table is missing",
+        "File storage is not initialised on the server — run `pnpm migrate`.",
+      );
+    }
+    throw error;
+  }
 
   return { id, session_id: sessionId, filename, mime, bytes: buffer.length, kind };
 }

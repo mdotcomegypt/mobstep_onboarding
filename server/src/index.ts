@@ -4,7 +4,7 @@ import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { env } from "./lib/env.ts";
 import { pruneUsedTokens } from "./lib/session.ts";
-import { MAX_UPLOAD_BYTES } from "./lib/uploads.ts";
+import { MAX_UPLOAD_BYTES, assertUploadDirWritable } from "./lib/uploads.ts";
 import { chatRoutes } from "./routes/chat.ts";
 import { otpRoutes } from "./routes/otp.ts";
 import { sessionRoutes } from "./routes/session.ts";
@@ -43,6 +43,15 @@ const prune = setInterval(() => {
   pruneUsedTokens().catch((error: unknown) => app.log.error({ err: error }, "prune failed"));
 }, 60 * 60 * 1000);
 prune.unref();
+
+// Fail fast, like env.ts does: a service that cannot store uploads should not
+// come up and pretend it can.
+try {
+  await assertUploadDirWritable();
+} catch (error) {
+  app.log.error((error as Error).message);
+  process.exit(1);
+}
 
 try {
   await app.listen({ port: env.port, host: "0.0.0.0" });

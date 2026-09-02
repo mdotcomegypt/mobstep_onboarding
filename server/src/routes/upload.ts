@@ -5,6 +5,7 @@ import "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
 import {
   MAX_UPLOAD_BYTES,
+  StorageError,
   UploadError,
   loadUpload,
   publicUrl,
@@ -46,6 +47,13 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
         return reply
           .code(413)
           .send({ error: `That file is too large. The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` });
+      }
+      // A misconfigured server is not the user's fault and "please try again"
+      // is false — retrying cannot help. Say what is actually wrong, since the
+      // person hitting this is usually the one who can fix it.
+      if (error instanceof StorageError) {
+        request.log.error({ err: error }, "upload storage failure");
+        return reply.code(503).send({ error: error.hint });
       }
       request.log.error({ err: error }, "upload failed");
       return reply.code(500).send({ error: "Could not save that file. Please try again." });
