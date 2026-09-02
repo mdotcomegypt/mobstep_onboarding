@@ -17,7 +17,8 @@ export interface CreateAppInput {
   business_type: string;
   language: string;
   currency: string;
-  theme?: string;
+  /** apps_application id of a template to clone; omit for the core default. */
+  theme?: number;
   voucher?: string;
   voucher_value?: number;
   action_button_text?: string;
@@ -83,7 +84,18 @@ async function call<T>(
   return parsed as T;
 }
 
+export interface Theme {
+  id: number;
+  package: string;
+  name: string;
+  business: string;
+  description: string;
+  screenshots: string[];
+}
+
 export const drupal = {
+  themes: () => call<{ themes: Theme[] }>("GET", "/api/v3.0/onboarding/themes"),
+
   createApp: (input: CreateAppInput) =>
     call<{ application_id: number; package: string }>(
       "POST",
@@ -114,7 +126,13 @@ export const drupal = {
 
   setTheme: (
     appId: number,
-    theme: { colors?: Record<string, string>; dimens?: Record<string, string> },
+    theme: {
+      /** design_system_* tokens; the path that rebrands the whole app. */
+      tokens?: Record<string, string>;
+      /** per-element overrides, for keys that should not follow a token */
+      colors?: Record<string, string>;
+      dimens?: Record<string, string>;
+    },
   ) =>
     call<{ package: string; keys_written: number }>(
       "POST",

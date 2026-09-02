@@ -19,6 +19,7 @@ import type { Card, Palette } from "./state.ts";
  */
 
 export const CARD_TOOLS = new Set([
+  "show_themes",
   "propose_palette",
   "review_catalog",
   "show_logo_options",
@@ -148,6 +149,79 @@ export function buildTools(ctx: ToolContext) {
     },
   );
 
+  const showThemes = tool(
+    async ({ business }) => {
+      const { themes } = await drupal.themes();
+      if (themes.length === 0) {
+        return "No templates are published, so the app will use the standard Mobstep layout.";
+      }
+
+      // Rank by business match, but always show the rest: an owner is allowed
+      // to prefer a layout built for a different trade.
+      const wanted = (business ?? "").toLowerCase();
+      const ranked = [...themes].sort((a, b) => {
+        const score = (t: (typeof themes)[number]) =>
+          wanted && t.business?.toLowerCase() === wanted ? 0 : 1;
+        return score(a) - score(b);
+      });
+
+      const card: Card = {
+        kind: "themes",
+        options: ranked.slice(0, 6).map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          business: t.business,
+          screenshots: t.screenshots.slice(0, 3),
+        })),
+      };
+      return JSON.stringify({ card });
+    },
+    {
+      name: "show_themes",
+      description:
+        "Show the owner the ready-made app layouts to choose from, ranked by how well they match their trade. Call this once you know what the business does and before assembling. They may also decline and keep the standard layout.",
+      schema: z.object({
+        business: z
+          .string()
+          .optional()
+          .describe("The business category, to rank matching templates first"),
+      }),
+    },
+  );
+
+  const chooseTheme = tool(
+    async ({ themeId }) => {
+      await mutateFacts(ctx.sessionId, (facts) => {
+        facts.themeId = themeId ?? null;
+      });
+      return themeId
+        ? `Layout #${themeId} recorded. It will be applied at assembly.`
+        : "Standard Mobstep layout recorded.";
+    },
+    {
+      name: "choose_theme",
+      description:
+        "Record the layout the owner picked. Pass the template id, or omit themeId if they want the standard layout.",
+      schema: z.object({ themeId: z.number().optional() }),
+    },
+  );
+
+  const chooseLogo = tool(
+    async ({ url }) => {
+      await mutateFacts(ctx.sessionId, (facts) => {
+        facts.brand.logoUrl = url;
+      });
+      return `Logo recorded. It will be applied to the app at assembly.`;
+    },
+    {
+      name: "choose_logo",
+      description:
+        "Record the logo the owner picked, by its URL — either one you showed from their website or one they uploaded. Call this as soon as they choose; without it the logo is not applied.",
+      schema: z.object({ url: z.string() }),
+    },
+  );
+
   const setCatalog = tool(
     async ({ categories }) => {
       await mutateFacts(ctx.sessionId, (facts) => {
@@ -243,6 +317,12 @@ export function buildTools(ctx: ToolContext) {
         f.packageName = packageName;
       });
 
+      // Idempotent: a retry after a partial failure must not create a second
+      // tenancy for the same owner.
+      if (facts.appId) {
+        return `This app is already assembled (#${facts.appId}, package "${facts.packageName}"). Use start_build to build it.`;
+      }
+
       const business = facts.business;
       if (!business.name) throw new Error("The business name is not set yet.");
 
@@ -254,6 +334,9 @@ export function buildTools(ctx: ToolContext) {
         business_type: business.type ?? "general",
         language: business.languages?.[0] ?? "en",
         currency: business.currency ?? "USD",
+        // Omitted when null: the app then keeps the mobstep_android_core
+        // defaults that create_new_project.sh laid down.
+        ...(facts.themeId ? { theme: facts.themeId } : {}),
       });
 
       const appId = created.application_id;
@@ -264,7 +347,18 @@ export function buildTools(ctx: ToolContext) {
 
       if (facts.brand.palette) {
         const p = facts.brand.palette;
+        // Design-system tokens, not individual keys: 755 of the app's colour
+        // keys reference these, so this is what actually repaints the app.
         await drupal.setTheme(appId, {
+          tokens: {
+            brand: p.brand,
+            on_brand: p.onBrand,
+            surface: p.surface,
+            on_surface: p.onSurface,
+            border: p.border,
+          },
+          // These three are not tokenized in the core (they are the Android
+          // theme's own attributes), so they are set directly.
           colors: {
             global_colorPrimary: p.brand,
             global_colorPrimaryDark: p.brand,
@@ -274,7 +368,14 @@ export function buildTools(ctx: ToolContext) {
       }
 
       if (facts.brand.logoUrl) {
-        await drupal.addAsset(appId, "logo", facts.brand.logoUrl);
+        // Non-fatal: an unreachable image must not lose the whole app. The
+        // owner can re-upload from the dashboard.
+        try {
+          await drupal.addAsset(appId, "logo", facts.brand.logoUrl);
+          await drupal.addAsset(appId, "icon", facts.brand.logoUrl);
+        } catch (error) {
+          console.error("logo attach failed", error);
+        }
       }
 
       const branchIds = facts.locations.branches.length
@@ -351,7 +452,10 @@ export function buildTools(ctx: ToolContext) {
     inspectWebsite,
     proposePalette,
     choosePalette,
+    showThemes,
+    chooseTheme,
     showLogoOptions,
+    chooseLogo,
     reviewCatalog,
     setCatalog,
     setBranches,

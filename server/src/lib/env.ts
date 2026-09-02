@@ -34,6 +34,9 @@ export const env = {
   sessionSecret: required("SESSION_SECRET"),
   databaseUrl: required("DATABASE_URL"),
 
+  /** Where owner-uploaded files are written. Must be writable and persistent. */
+  uploadDir: optional("UPLOAD_DIR", "/opt/mobstep_onboarding/uploads"),
+
   whatsapp: {
     businessAccountId: required("WA_BUSINESS_ACCOUNT_ID"),
     phoneNumberId: required("WA_PHONE_NUMBER_ID"),

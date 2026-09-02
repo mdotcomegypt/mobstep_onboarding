@@ -59,6 +59,8 @@ export interface OnboardingFacts {
   locations: { branches: BranchDraft[] };
   appId?: number;
   packageName?: string;
+  /** Chosen template id, or null once the owner has settled on the default. */
+  themeId?: number | null;
   phase: Phase;
 }
 
@@ -83,4 +85,15 @@ export type Card =
   | { kind: "screen_mock"; url: string; caption?: string }
   | { kind: "table"; title: string; columns: string[]; rows: string[][] }
   | { kind: "progress"; label: string; status: "running" | "success" | "failed"; log?: string }
-  | { kind: "link"; label: string; href: string };
+  | { kind: "link"; label: string; href: string }
+  | { kind: "attachment"; url: string; filename: string; mime: string }
+  | {
+      kind: "themes";
+      options: Array<{
+        id: number;
+        name: string;
+        description: string;
+        business: string;
+        screenshots: string[];
+      }>;
+    };

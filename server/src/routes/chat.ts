@@ -4,6 +4,7 @@ import { loadFacts } from "../graph/facts.ts";
 import { CARD_TOOLS } from "../graph/tools.ts";
 import type { Card } from "../graph/state.ts";
 import { query } from "../db/index.ts";
+import { listUploads, loadUpload, publicUrl } from "../lib/uploads.ts";
 import { requireVerified } from "./guard.ts";
 
 /**
@@ -34,13 +35,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ messages: rows, phase: facts.phase });
   });
 
-  app.post<{ Body: { message?: string } }>("/api/chat", async (request, reply) => {
+  app.post<{ Body: { message?: string; attachments?: string[] } }>(
+    "/api/chat",
+    async (request, reply) => {
     const session = await requireVerified(request, reply);
     if (!session) return;
 
     const text = (request.body?.message ?? "").trim();
-    // An empty message is how the client asks for the opening greeting.
-    const isOpening = text === "";
+    const attachmentIds = (request.body?.attachments ?? []).slice(0, 6);
+    // An empty message with no files is how the client asks for the greeting.
+    const isOpening = text === "" && attachmentIds.length === 0;
 
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -61,10 +65,20 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const cards: Card[] = [];
 
     try {
+      // Only this session's uploads are addressable, so a guessed id from
+      // another owner's conversation resolves to nothing.
+      const attachments = await listUploads(session.id, attachmentIds);
+
       if (!isOpening) {
+        const cards: Card[] = attachments.map((a) => ({
+          kind: "attachment",
+          url: publicUrl(a.id),
+          filename: a.filename,
+          mime: a.mime,
+        }));
         await query(
-          "INSERT INTO onboarding_messages (session_id, role, content) VALUES ($1, 'user', $2)",
-          [session.id, text],
+          "INSERT INTO onboarding_messages (session_id, role, content, cards) VALUES ($1, 'user', $2, $3)",
+          [session.id, text, JSON.stringify(cards)],
         );
       }
 
@@ -74,14 +88,40 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         appId: session.app_id,
       });
 
+      // Images go to the model as image parts, not as a link for it to fetch.
+      // Gemini reads them directly, which is how a photographed menu becomes a
+      // catalog without the owner retyping it.
+      const parts: Array<Record<string, unknown>> = [];
+      for (const attachment of attachments) {
+        if (!attachment.mime.startsWith("image/")) continue;
+        const file = await loadUpload(attachment.id);
+        if (!file) continue;
+        parts.push({
+          type: "image_url",
+          image_url: { url: `data:${attachment.mime};base64,${file.bytes.toString("base64")}` },
+        });
+      }
+
+      const nonImages = attachments.filter((a) => !a.mime.startsWith("image/"));
+      const preamble = isOpening
+        ? "(The owner has just arrived. Greet them and start.)"
+        : text ||
+          (parts.length
+            ? "(The owner sent this image. Read it and tell them what you found.)"
+            : "(The owner sent a file.)");
+
+      parts.unshift({
+        type: "text",
+        text:
+          nonImages.length > 0
+            ? `${preamble}\n\n(Also attached, which you cannot read directly: ${nonImages
+                .map((a) => a.filename)
+                .join(", ")})`
+            : preamble,
+      });
+
       const input = {
-        messages: [
-          new HumanMessage(
-            isOpening
-              ? "(The owner has just arrived. Greet them and start.)"
-              : text,
-          ),
-        ],
+        messages: [new HumanMessage({ content: parts })],
       };
 
       const stream = graph.streamEvents(input, {
@@ -130,7 +170,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       clearInterval(heartbeat);
       reply.raw.end();
     }
-  });
+  },
+  );
 }
 
 /**

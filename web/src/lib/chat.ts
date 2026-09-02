@@ -2,7 +2,7 @@
  * SSE client for the chat endpoint.
  *
  * Uses fetch + a ReadableStream rather than EventSource, because the turn is a
- * POST carrying the message and EventSource can only issue GETs.
+ * POST carrying the message and its attachments, and EventSource only does GET.
  */
 
 export interface Palette {
@@ -20,7 +20,25 @@ export type Card =
   | { kind: "screen_mock"; url: string; caption?: string }
   | { kind: "table"; title: string; columns: string[]; rows: string[][] }
   | { kind: "progress"; label: string; status: "running" | "success" | "failed"; log?: string }
-  | { kind: "link"; label: string; href: string };
+  | { kind: "link"; label: string; href: string }
+  | { kind: "attachment"; url: string; filename: string; mime: string }
+  | {
+      kind: "themes";
+      options: Array<{
+        id: number;
+        name: string;
+        description: string;
+        business: string;
+        screenshots: string[];
+      }>;
+    };
+
+export interface UploadedFile {
+  id: string;
+  filename: string;
+  mime: string;
+  url: string;
+}
 
 export interface ChatHandlers {
   onToken: (text: string) => void;
@@ -30,8 +48,27 @@ export interface ChatHandlers {
   onError: (message: string) => void;
 }
 
+export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file, file.name);
+
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+
+  const body = (await response.json().catch(() => ({}))) as {
+    files?: UploadedFile[];
+    error?: string;
+  };
+  if (!response.ok) throw new Error(body.error ?? "Upload failed.");
+  return body.files ?? [];
+}
+
 export async function streamTurn(
   message: string,
+  attachments: string[],
   handlers: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -39,7 +76,7 @@ export async function streamTurn(
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, attachments }),
     signal,
   });
 
