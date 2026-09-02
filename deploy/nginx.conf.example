@@ -34,6 +34,8 @@ server {
         proxy_read_timeout 300s;
     }
 
+    # Everything not under /api/ is the SPA. Note this swallows any app route
+    # outside /api/ — which is why /health is also registered as /api/health.
     location / {
         try_files $uri $uri/ /index.html;
     }

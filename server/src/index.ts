@@ -54,7 +54,14 @@ const buildInfo = await (async () => {
   }
 })();
 
-app.get("/health", async () => ({ ok: true, ...buildInfo }));
+const health = async () => ({ ok: true, ...buildInfo });
+
+// Registered under /api/ as well as at the root. nginx proxies /api/ and serves
+// everything else from the SPA's dist with a try_files fallback to index.html,
+// so a bare /health is answered with the React app rather than this JSON —
+// which makes it useless for checking which build is running.
+app.get("/health", health);
+app.get("/api/health", health);
 
 await app.register(sessionRoutes);
 await app.register(otpRoutes);

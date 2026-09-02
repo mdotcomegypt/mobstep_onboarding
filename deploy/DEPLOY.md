@@ -146,14 +146,16 @@ cd /var/www/html/mobstep_onboarding
 git pull
 pnpm deploy                       # install + build + migrate
 sudo systemctl restart mobstep-onboarding
-curl -s localhost:8080/health     # commit here must match `git rev-parse --short HEAD`
+curl -s localhost:8080/api/health # commit here must match `git rev-parse --short HEAD`
 ```
 
 **`dist/` is gitignored and systemd runs `dist/index.js`, so a `git pull`
 changes nothing until you rebuild.** Skipping the build leaves the service on
 old code while the checkout looks current — new routes 404 and old bugs persist,
 which reads as "the fix didn't work". `pnpm deploy` exists so the build cannot
-be forgotten, and `/health` reports the built commit so the mismatch is visible:
+be forgotten, and `/api/health` reports the built commit so the mismatch is visible (use
+`/api/health`, not `/health` — nginx serves anything outside `/api/` from the
+SPA, so a bare `/health` returns the React app):
 
 ```json
 {"ok":true,"commit":"33cf36f","builtAt":"2026-09-02T05:17:37.558Z"}
