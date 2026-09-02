@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { HumanMessage, buildGraph, threadId } from "../graph/agent.ts";
 import { loadFacts } from "../graph/facts.ts";
 import { CARD_TOOLS } from "../graph/tools.ts";
-import type { Card } from "../graph/state.ts";
+import type { Card, OnboardingFacts } from "../graph/state.ts";
 import { query } from "../db/index.ts";
 import { listUploads, loadUpload, publicUrl } from "../lib/uploads.ts";
 import { requireVerified } from "./guard.ts";
@@ -32,7 +32,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       [session.id],
     );
     const facts = await loadFacts(session.id);
-    return reply.send({ messages: rows, phase: facts.phase });
+    return reply.send({ messages: rows, phase: facts.phase, facts: previewOf(facts) });
   });
 
   app.post<{ Body: { message?: string; attachments?: string[] } }>(
@@ -159,7 +159,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       );
 
       const facts = await loadFacts(session.id);
-      send("done", { phase: facts.phase, appId: facts.appId ?? null });
+      send("done", {
+        phase: facts.phase,
+        appId: facts.appId ?? null,
+        facts: previewOf(facts),
+      });
     } catch (error) {
       request.log.error({ err: error }, "chat turn failed");
 
@@ -180,6 +184,29 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
   },
   );
+}
+
+/**
+ * The slice of the facts the live preview renders.
+ *
+ * Deliberately narrow: the preview needs a name, a palette, a logo and a few
+ * item names. Shipping the whole record would put branch phone numbers and
+ * every extracted price into a payload sent on every turn for no reason.
+ */
+function previewOf(facts: OnboardingFacts) {
+  return {
+    name: facts.business.name ?? null,
+    type: facts.business.type ?? null,
+    logoUrl: facts.brand.logoUrl ?? null,
+    palette: facts.brand.palette ?? null,
+    themeId: facts.themeId ?? null,
+    branches: facts.locations.branches.length,
+    categories: facts.catalog.categories.map((c) => ({
+      name: c.name,
+      items: c.items.slice(0, 4).map((i) => ({ name: i.name, price: i.price ?? null })),
+      total: c.items.length,
+    })),
+  };
 }
 
 /**

@@ -33,6 +33,20 @@ export type Card =
       }>;
     };
 
+export interface PreviewFacts {
+  name: string | null;
+  type: string | null;
+  logoUrl: string | null;
+  palette: Palette | null;
+  themeId: number | null;
+  branches: number;
+  categories: Array<{
+    name: string;
+    items: Array<{ name: string; price: number | null }>;
+    total: number;
+  }>;
+}
+
 export interface UploadedFile {
   id: string;
   filename: string;
@@ -44,7 +58,7 @@ export interface ChatHandlers {
   onToken: (text: string) => void;
   onCard: (card: Card) => void;
   onTool: (name: string) => void;
-  onDone: (info: { phase: string; appId: number | null }) => void;
+  onDone: (info: { phase: string; appId: number | null; facts: PreviewFacts }) => void;
   onError: (message: string, detail?: string) => void;
 }
 
@@ -129,7 +143,7 @@ export async function streamTurn(
           handlers.onTool((parsed as { name: string }).name);
           break;
         case "done":
-          handlers.onDone(parsed as { phase: string; appId: number | null });
+          handlers.onDone(parsed as { phase: string; appId: number | null; facts: PreviewFacts });
           break;
         case "error": {
           const payload = parsed as { message: string; detail?: string };
@@ -147,8 +161,16 @@ export interface HistoryMessage {
   cards: Card[];
 }
 
-export async function loadHistory(): Promise<{ messages: HistoryMessage[]; phase: string }> {
+export async function loadHistory(): Promise<{
+  messages: HistoryMessage[];
+  phase: string;
+  facts: PreviewFacts | null;
+}> {
   const response = await fetch("/api/chat/history", { credentials: "include" });
-  if (!response.ok) return { messages: [], phase: "discovery" };
-  return (await response.json()) as { messages: HistoryMessage[]; phase: string };
+  if (!response.ok) return { messages: [], phase: "discovery", facts: null };
+  return (await response.json()) as {
+    messages: HistoryMessage[];
+    phase: string;
+    facts: PreviewFacts | null;
+  };
 }

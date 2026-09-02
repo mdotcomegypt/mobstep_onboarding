@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionView } from "../lib/api.ts";
-import { type Card, loadHistory, streamTurn } from "../lib/chat.ts";
+import { type Card, type PreviewFacts, loadHistory, streamTurn } from "../lib/chat.ts";
+import { AppPreview } from "./AppPreview.tsx";
 import { CardView } from "./Cards.tsx";
 import { Composer } from "./Composer.tsx";
 
@@ -37,6 +38,8 @@ const PHASES = [
 export function Chat({ session }: { session: SessionView }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [phase, setPhase] = useState("discovery");
+  const [facts, setFacts] = useState<PreviewFacts | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [activity, setActivity] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,6 +91,7 @@ export function Chat({ session }: { session: SessionView }) {
         onDone: (info) => {
           setActivity(null);
           setPhase(info.phase);
+          if (info.facts) setFacts(info.facts);
         },
         onError: (message, detail) => setError({ message, detail }),
       });
@@ -121,6 +125,7 @@ export function Chat({ session }: { session: SessionView }) {
     void (async () => {
       const history = await loadHistory();
       setPhase(history.phase);
+      if (history.facts) setFacts(history.facts);
       if (history.messages.length > 0) {
         setTurns(
           history.messages.map((m) => ({
@@ -138,6 +143,7 @@ export function Chat({ session }: { session: SessionView }) {
   const activeIndex = PHASES.findIndex((p) => p.id === phase);
 
   return (
+    <div className={`workspace${previewOpen ? " preview-open" : ""}`}>
     <div className="chat">
       <header className="chat-header">
         <div className="brand">
@@ -218,6 +224,20 @@ export function Chat({ session }: { session: SessionView }) {
       </div>
 
       <Composer busy={busy} onSend={(text, attachments) => void send(text, attachments)} />
+    </div>
+
+      {/* On a phone the preview is a sheet the owner pulls up; there is not
+          room for it beside a conversation. On desktop it is always visible. */}
+      <button
+        type="button"
+        className="preview-toggle"
+        aria-expanded={previewOpen}
+        onClick={() => setPreviewOpen((open) => !open)}
+      >
+        {previewOpen ? "Hide preview" : "Preview your app"}
+      </button>
+
+      <AppPreview facts={facts} onClose={() => setPreviewOpen(false)} />
     </div>
   );
 }
