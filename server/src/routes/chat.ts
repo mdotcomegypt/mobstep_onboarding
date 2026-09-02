@@ -162,9 +162,17 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       send("done", { phase: facts.phase, appId: facts.appId ?? null });
     } catch (error) {
       request.log.error({ err: error }, "chat turn failed");
+
+      // The generic message alone made every failure look identical and lived
+      // only in journalctl, so the same class of bug had to be guessed at
+      // repeatedly. `detail` carries the provider's own words — model errors
+      // are about payload shape and size, not user data — and the UI shows it
+      // small and muted beneath the friendly line.
+      const raw = error instanceof Error ? error.message : String(error);
       send("error", {
         message:
           "Something went wrong on our side. Try sending that again — I kept everything so far.",
+        detail: raw.replace(/\s+/g, " ").slice(0, 400),
       });
     } finally {
       clearInterval(heartbeat);

@@ -25,6 +25,53 @@ import { buildTools, type ToolContext } from "./tools.ts";
  * a checkpoint).
  */
 
+/**
+ * Removes image data from every message except the most recent one.
+ *
+ * Images live in the checkpointed history forever, and this node re-sends the
+ * whole history on every model call — including each tool round-trip within a
+ * single turn. A 500 KB photo is ~670 KB of base64, so two or three menu
+ * photographs push the request past Gemini's size limit and the turn fails with
+ * an opaque 400.
+ *
+ * Dropping them is safe: whatever the model read out of a photo is already in
+ * the facts record and in its own prior replies. Keeping the pixels buys
+ * nothing and costs the conversation. A placeholder is left behind so the
+ * history still reads coherently.
+ */
+function stripOldImages(messages: BaseMessage[]): BaseMessage[] {
+  const lastImageIndex = messages.findLastIndex(
+    (m) =>
+      Array.isArray(m.content) &&
+      m.content.some((part) => (part as { type?: string }).type === "image_url"),
+  );
+  if (lastImageIndex < 0) return messages;
+
+  return messages.map((message, index) => {
+    if (index === lastImageIndex || !Array.isArray(message.content)) {
+      return message;
+    }
+
+    const parts = message.content as Array<Record<string, unknown>>;
+    if (!parts.some((part) => part["type"] === "image_url")) {
+      return message;
+    }
+
+    const kept = parts.filter((part) => part["type"] !== "image_url");
+    const dropped = parts.length - kept.length;
+    kept.push({
+      type: "text",
+      text: `(${dropped} image${dropped === 1 ? "" : "s"} sent earlier, already read)`,
+    });
+
+    // Cloning keeps the checkpointed state untouched; only what goes to the
+    // model this call is trimmed.
+    const trimmed = Object.create(Object.getPrototypeOf(message)) as BaseMessage;
+    Object.assign(trimmed, message, { content: kept });
+    return trimmed;
+  });
+}
+
 let checkpointer: PostgresSaver | null = null;
 
 export async function getCheckpointer(): Promise<PostgresSaver> {
@@ -59,7 +106,7 @@ export async function buildGraph(ctx: ToolContext) {
     const facts = await loadFacts(ctx.sessionId);
     const messages: BaseMessage[] = [
       new SystemMessage(systemPrompt(facts, null)),
-      ...state.messages,
+      ...stripOldImages(state.messages),
     ];
     return { messages: [await llm.invoke(messages)] };
   };

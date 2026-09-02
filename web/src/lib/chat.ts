@@ -45,7 +45,7 @@ export interface ChatHandlers {
   onCard: (card: Card) => void;
   onTool: (name: string) => void;
   onDone: (info: { phase: string; appId: number | null }) => void;
-  onError: (message: string) => void;
+  onError: (message: string, detail?: string) => void;
 }
 
 export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
@@ -131,9 +131,11 @@ export async function streamTurn(
         case "done":
           handlers.onDone(parsed as { phase: string; appId: number | null });
           break;
-        case "error":
-          handlers.onError((parsed as { message: string }).message);
+        case "error": {
+          const payload = parsed as { message: string; detail?: string };
+          handlers.onError(payload.message, payload.detail);
           break;
+        }
       }
     }
   }

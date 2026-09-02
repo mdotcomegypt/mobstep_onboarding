@@ -38,7 +38,7 @@ export function Chat({ session }: { session: SessionView }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [phase, setPhase] = useState("discovery");
   const [activity, setActivity] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const bottom = useRef<HTMLDivElement>(null);
@@ -89,10 +89,10 @@ export function Chat({ session }: { session: SessionView }) {
           setActivity(null);
           setPhase(info.phase);
         },
-        onError: (message) => setError(message),
+        onError: (message, detail) => setError({ message, detail }),
       });
     } catch {
-      setError("The connection dropped.");
+      setError({ message: "The connection dropped." });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -203,7 +203,12 @@ export function Chat({ session }: { session: SessionView }) {
 
         {error && (
           <div className="error-bar">
-            <span>{error}</span>
+            <div className="error-text">
+              <span>{error.message}</span>
+              {/* The provider's own words. Muted and secondary, but present:
+                  without it every failure looks the same from the outside. */}
+              {error.detail && <code className="error-detail">{error.detail}</code>}
+            </div>
             <button type="button" className="link inline" onClick={retry}>
               Try again
             </button>

@@ -436,3 +436,10 @@ tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.error-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.error-detail {
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
