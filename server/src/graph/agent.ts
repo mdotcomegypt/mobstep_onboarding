@@ -4,6 +4,7 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { env } from "../lib/env.ts";
+import { trace } from "../lib/trace.ts";
 import { loadFacts } from "./facts.ts";
 import { systemPrompt } from "./prompt.ts";
 import { buildTools, type ToolContext } from "./tools.ts";
@@ -59,6 +60,8 @@ function stripOldImages(messages: BaseMessage[]): BaseMessage[] {
 
     const kept = parts.filter((part) => part["type"] !== "image_url");
     const dropped = parts.length - kept.length;
+    // kept may now be empty (a message that was only an image); the placeholder
+    // below is what stops this producing a zero-parts entry.
     kept.push({
       type: "text",
       text: `(${dropped} image${dropped === 1 ? "" : "s"} sent earlier, already read)`,
@@ -70,6 +73,60 @@ function stripOldImages(messages: BaseMessage[]): BaseMessage[] {
     Object.assign(trimmed, message, { content: kept });
     return trimmed;
   });
+}
+
+/**
+ * Drops messages that would serialize to an empty `parts` array.
+ *
+ * Gemini rejects the whole request with
+ *   400 "must include at least one parts field"
+ * if any entry in `contents` has no parts. An assistant message with empty
+ * content produces exactly that — and empty assistant messages are precisely
+ * what this service used to write whenever a model run returned nothing.
+ *
+ * The consequence is worse than one lost reply: once such a message is in the
+ * checkpoint it is re-sent on every later turn, so the conversation is
+ * permanently broken from that point on. That is why uploading a menu failed
+ * every single time while earlier turns had worked — the image was never the
+ * problem, the history was.
+ *
+ * A message is kept when it has text, or tool calls, or is a tool result:
+ * dropping an assistant message that carries tool calls, or the tool result
+ * that answers it, would break the pairing Gemini validates.
+ */
+function hasRenderableContent(message: BaseMessage): boolean {
+  const toolCalls = (message as { tool_calls?: unknown[] }).tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) return true;
+  if (message.getType() === "tool") return true;
+
+  const content = message.content;
+  if (typeof content === "string") return content.trim() !== "";
+
+  if (Array.isArray(content)) {
+    return content.some((part: unknown) => {
+      if (typeof part === "string") return part.trim() !== "";
+      const typed = part as { type?: string; text?: string };
+      if (typed.type === "text") return (typed.text ?? "").trim() !== "";
+      // Images and other non-text parts are content in their own right.
+      return typed.type !== undefined;
+    });
+  }
+
+  return false;
+}
+
+function sanitizeHistory(
+  messages: BaseMessage[],
+  ctx: { sessionId: number },
+): BaseMessage[] {
+  const kept = stripOldImages(messages).filter(hasRenderableContent);
+  const dropped = messages.length - kept.length;
+  if (dropped > 0) {
+    // Worth seeing: it means empty messages are still being written somewhere,
+    // even though they no longer break the conversation.
+    trace("history.pruned", { dropped, kept: kept.length }, { sessionId: ctx.sessionId });
+  }
+  return kept;
 }
 
 let checkpointer: PostgresSaver | null = null;
@@ -106,7 +163,7 @@ export async function buildGraph(ctx: ToolContext) {
     const facts = await loadFacts(ctx.sessionId);
     const messages: BaseMessage[] = [
       new SystemMessage(systemPrompt(facts, null)),
-      ...stripOldImages(state.messages),
+      ...sanitizeHistory(state.messages, { sessionId: ctx.sessionId }),
     ];
     return { messages: [await llm.invoke(messages)] };
   };
