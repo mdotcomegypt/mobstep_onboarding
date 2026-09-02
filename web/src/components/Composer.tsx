@@ -11,9 +11,12 @@ const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,application/pdf";
  */
 export function Composer({
   busy,
+  activity,
   onSend,
 }: {
   busy: boolean;
+  /** What the agent is doing right now, if anything. */
+  activity: string | null;
   onSend: (text: string, attachments: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -127,8 +130,18 @@ export function Composer({
           ref={textarea}
           value={draft}
           rows={1}
+          // Never "Thinking…". The box is the one thing the owner is looking
+          // at while they wait, and a static word there for two minutes is how
+          // a working turn gets mistaken for a dead one. When the agent has
+          // said what it is doing, that goes here instead.
           placeholder={
-            uploading ? "Uploading…" : busy ? "Thinking…" : "Message, or attach your menu…"
+            uploading
+              ? "Uploading…"
+              : activity
+                ? `${activity}…`
+                : busy
+                  ? "Working on it…"
+                  : "Message, or attach your menu…"
           }
           disabled={busy}
           onChange={(e) => {
@@ -161,7 +174,16 @@ export function Composer({
           </svg>
         </button>
       </form>
-      <p className="hint">Enter to send · Shift+Enter for a new line · paste or drop a photo</p>
+      <p className="hint">
+        {busy && activity ? (
+          <span className="hint-live">
+            <span className="pulse" aria-hidden="true" />
+            {activity}
+          </span>
+        ) : (
+          "Enter to send · Shift+Enter for a new line · paste or drop a photo"
+        )}
+      </p>
     </div>
   );
 }

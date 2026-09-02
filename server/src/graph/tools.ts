@@ -2,6 +2,15 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { drupal } from "../lib/drupal.ts";
 import { asUntrusted, fetchSite } from "../lib/site.ts";
+import {
+  generateCategoryIcons,
+  generateItemPhotos,
+  generateLogo,
+  generatePlaceholder,
+  type ItemRef,
+} from "../lib/imagery.ts";
+import { scanMenu } from "../lib/menu.ts";
+import { report } from "../lib/progress.ts";
 import { mutateFacts } from "./facts.ts";
 import type { Card, Palette } from "./state.ts";
 import { slugify } from "../lib/slug.ts";
@@ -26,6 +35,11 @@ export const CARD_TOOLS = new Set([
   "review_catalog",
   "show_logo_options",
   "start_build",
+  "draw_category_icons",
+  "draw_item_photos",
+  "draw_placeholder",
+  "draw_logo",
+  "scan_menu",
 ]);
 
 const hex = z
@@ -240,7 +254,25 @@ export function buildTools(ctx: ToolContext) {
       });
       const cats = facts.catalog.categories;
       const count = cats.reduce((n, c) => n + c.items.length, 0);
-      return `Catalog confirmed: ${cats.length} categories, ${count} items. Next: ask for their branch address and a phone number.`;
+
+      // Confirming an empty catalog is never what anyone meant, and it used to
+      // succeed silently and take an empty app all the way to a green build.
+      if (cats.length === 0) {
+        return (
+          "Nothing has been collected yet, so there is nothing to confirm. " +
+          "If they have sent a menu photo, call scan_menu. If they listed items " +
+          "in chat, call add_items. Do not call set_catalog again until one of " +
+          "those has returned items."
+        );
+      }
+
+      return (
+        `Catalog confirmed: ${cats.length} categories, ${count} items. ` +
+        "Next: dress it. Call draw_category_icons, then draw_placeholder, then " +
+        "draw_item_photos — in that order, without asking permission for each " +
+        "one; announce the set once and let the progress show. After that, ask " +
+        "for their branch address and a phone number."
+      );
     },
     {
       name: "set_catalog",
@@ -265,21 +297,48 @@ export function buildTools(ctx: ToolContext) {
 
   const reviewCatalog = tool(
     async ({ categories }) => {
-      const rows = categories.flatMap((c) =>
-        c.items.map((i) => [c.name, i.name, i.price === undefined ? "—" : String(i.price)]),
-      );
+      // Showing and saving are the same act.
+      //
+      // This used to render a card and persist nothing, on the reasoning that
+      // the owner had not confirmed yet and set_catalog was where confirmation
+      // landed. That reasoning had a hole big enough to lose a whole menu
+      // through: set_catalog with no arguments confirms "whatever was
+      // collected", and after review_catalog nothing had been collected. The
+      // agent read 93 items, showed them, confirmed them, and assembled an app
+      // with an empty catalog — with every individual step reporting success.
+      //
+      // A draft the owner has not confirmed is still a draft; `set_catalog`
+      // remains what moves the phase on. But it is written down.
+      const facts = await mutateFacts(ctx.sessionId, (f) => {
+        f.catalog.categories = categories;
+        if (!f.catalog.source) f.catalog.source = "chat";
+      });
+      const total = categories.reduce((n, c) => n + c.items.length, 0);
+
+      // Sections, not a flat table. A 120-row table of a menu the owner already
+      // knows by heart is unreadable; what they actually need to check is that
+      // the sections are right and the prices in each one look familiar.
       const card: Card = {
-        kind: "table",
-        title: "Here's the catalog I found — does this look right?",
-        columns: ["Category", "Item", "Price"],
-        rows,
+        kind: "catalog",
+        title: `I read ${total} items across ${categories.length} sections`,
+        ...(facts.business.currency ? { currency: facts.business.currency } : {}),
+        categories: categories.map((c) => ({
+          name: c.name,
+          items: c.items.map((i) => ({
+            name: i.name,
+            ...(i.price === undefined ? {} : { price: i.price }),
+          })),
+        })),
       };
-      return JSON.stringify({ card });
+      return JSON.stringify({
+        card,
+        next: "Ask whether it looks right and whether there is another page to send.",
+      });
     },
     {
       name: "review_catalog",
       description:
-        "Show the owner the catalog you have extracted, as a table, before saving it.",
+        "Show the owner a catalog you have typed out yourself, and save it as a draft for them to confirm. For a menu the owner PHOTOGRAPHED, use scan_menu instead — it reads the image directly and does not spend this turn's output budget on the items.",
       schema: z.object({
         categories: z.array(
           z.object({
@@ -321,12 +380,21 @@ export function buildTools(ctx: ToolContext) {
       const cats = facts.catalog.categories;
       const total = cats.reduce((n, c) => n + c.items.length, 0);
       const card: Card = {
-        kind: "table",
-        title: `Catalog so far — ${cats.length} categories, ${total} items`,
-        columns: ["Category", "Item", "Price"],
-        rows: cats.flatMap((c) =>
-          c.items.map((i) => [c.name, i.name, i.price === undefined ? "—" : String(i.price)]),
-        ),
+        kind: "catalog",
+        title: `Catalog so far — ${cats.length} sections, ${total} items`,
+        ...(facts.business.currency ? { currency: facts.business.currency } : {}),
+        ...(facts.artwork.placeholderUrl
+          ? { placeholderUrl: facts.artwork.placeholderUrl }
+          : {}),
+        categories: cats.map((c) => ({
+          name: c.name,
+          ...(c.iconUrl ? { iconUrl: c.iconUrl } : {}),
+          items: c.items.map((i) => ({
+            name: i.name,
+            ...(i.price === undefined ? {} : { price: i.price }),
+            ...(i.imageUrl ? { imageUrl: i.imageUrl } : {}),
+          })),
+        })),
       };
       return JSON.stringify({
         card,
@@ -356,13 +424,308 @@ export function buildTools(ctx: ToolContext) {
     },
   );
 
+
+  /**
+   * Artwork.
+   *
+   * A catalog scanned off a printed menu is text, and text alone renders as a
+   * grid of empty rectangles. These four tools are what turn it into something
+   * an owner recognises as their shop. All of them are best-effort by design:
+   * a failed icon returns a named failure and the conversation carries on.
+   */
+
+  const drawCategoryIcons = tool(
+    async ({ categories }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      // Capped. Each icon is a separate image generation against a tight
+      // quota, so a catalog with thirty sections would hold the conversation
+      // for ten minutes to decorate sections the owner has to scroll to reach.
+      // The first twelve cover the screens anyone actually sees.
+      const MAX_ICONS = 12;
+      const names = (
+        categories && categories.length > 0
+          ? categories
+          : facts.catalog.categories.map((c) => c.name)
+      ).slice(0, MAX_ICONS);
+
+      if (names.length === 0) {
+        return "There are no categories yet. Read the menu first, then call this.";
+      }
+
+      const { icons, failed } = await generateCategoryIcons(
+        ctx.sessionId,
+        names,
+        facts.brand.palette,
+        facts.business.type ?? "",
+      );
+
+      const byName = new Map(icons.map((i) => [i.category, i.url]));
+      await mutateFacts(ctx.sessionId, (f) => {
+        for (const category of f.catalog.categories) {
+          const url = byName.get(category.name);
+          if (url) category.iconUrl = url;
+        }
+      });
+
+      const card: Card = {
+        kind: "gallery",
+        title: `Section icons — ${icons.length} drawn`,
+        caption: facts.brand.palette
+          ? `Drawn as one set in your brand colour, ${facts.brand.palette.brand}.`
+          : "Drawn as one matching set.",
+        images: icons.map((i) => ({ url: i.url, label: i.category, shape: "icon" })),
+      };
+
+      return JSON.stringify({
+        card,
+        made: icons.length,
+        failed: failed.map((f) => f.category),
+        next:
+          failed.length > 0
+            ? `Say that ${failed.length} could not be drawn (${failed
+                .map((f) => f.category)
+                .join(", ")}) and offer to try those again. Then ask if the set looks right.`
+            : "Say the icons are done and ask whether they want any of them redrawn.",
+      });
+    },
+    {
+      name: "draw_category_icons",
+      description:
+        "Draw one icon per catalog category, as a matching set in the brand colour. Call this after the catalog is read and the palette is chosen. Omit `categories` to draw every category on file — that is almost always what you want.",
+      schema: z.object({
+        categories: z
+          .array(z.string())
+          .optional()
+          .describe("Only to redraw specific ones; omit to do the whole catalog"),
+      }),
+    },
+  );
+
+  const drawItemPhotos = tool(
+    async ({ items }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+
+      // Chosen for them when they do not choose: the first item of each
+      // category, which is what fills the home screen and the section headers.
+      const picked: ItemRef[] =
+        items && items.length > 0
+          ? items.map((i) => ({ category: i.category, name: i.name }))
+          : facts.catalog.categories
+              .filter((c) => c.items.length > 0)
+              .slice(0, 6)
+              .map((c) => ({
+                category: c.name,
+                name: (c.items[0] as { name: string }).name,
+                ...((c.items[0] as { description?: string }).description
+                  ? { description: (c.items[0] as { description?: string }).description }
+                  : {}),
+              }));
+
+      if (picked.length === 0) {
+        return "There are no items yet. Read the menu first, then call this.";
+      }
+
+      const { photos, failed } = await generateItemPhotos(
+        ctx.sessionId,
+        picked,
+        facts.business.type ?? "",
+      );
+
+      await mutateFacts(ctx.sessionId, (f) => {
+        for (const photo of photos) {
+          const category = f.catalog.categories.find((c) => c.name === photo.category);
+          const item = category?.items.find((i) => i.name === photo.item);
+          if (item) item.imageUrl = photo.url;
+        }
+      });
+
+      const card: Card = {
+        kind: "gallery",
+        title: `Item photos — ${photos.length} shot`,
+        caption: "A photo for the headline item in each section; the rest use your placeholder.",
+        images: photos.map((p) => ({ url: p.url, label: p.item, shape: "photo" })),
+      };
+
+      return JSON.stringify({
+        card,
+        made: photos.length,
+        failed: failed.map((f) => f.item),
+        next: "Say these are samples, that every other item falls back to the branded placeholder, and that they can swap any of them later from the dashboard.",
+      });
+    },
+    {
+      name: "draw_item_photos",
+      description:
+        "Generate photographs for a handful of headline items, to show the owner what the storefront will look like. Omit `items` to let it pick the first item of each of the first six categories. Never try to photograph a whole menu — that is what the placeholder is for.",
+      schema: z.object({
+        items: z
+          .array(z.object({ category: z.string(), name: z.string() }))
+          .max(8)
+          .optional(),
+      }),
+    },
+  );
+
+  const drawPlaceholder = tool(
+    async () => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const artwork = await generatePlaceholder(
+        ctx.sessionId,
+        facts.brand.palette,
+        facts.business.type ?? "",
+        facts.business.name ?? "",
+      );
+
+      if (!artwork) {
+        return "The placeholder could not be generated. Say so plainly and offer to try again; the app will fall back to a plain tile in the brand colour if not.";
+      }
+
+      await mutateFacts(ctx.sessionId, (f) => {
+        f.artwork.placeholderUrl = artwork.url;
+      });
+
+      const card: Card = {
+        kind: "gallery",
+        title: "Placeholder for items without a photo",
+        caption: "Built from your palette, so an item with no photo still looks deliberate.",
+        images: [{ url: artwork.url, label: "Placeholder", shape: "tile" }],
+      };
+      return JSON.stringify({ card, next: "Show it and move on; do not dwell on it." });
+    },
+    {
+      name: "draw_placeholder",
+      description:
+        "Generate the single brand-matched image used for every catalog item that has no photograph of its own. Call this once, after the palette is chosen.",
+      schema: z.object({}),
+    },
+  );
+
+  const drawLogo = tool(
+    async ({ brief }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      if (!facts.business.name) {
+        return "The business name is not set yet; record_business first.";
+      }
+
+      const artwork = await generateLogo(
+        ctx.sessionId,
+        facts.business.name,
+        facts.business.type ?? "",
+        facts.brand.palette,
+        brief ?? "",
+      );
+
+      if (!artwork) {
+        return "The logo could not be generated. Offer to try a different direction, or to use one from their page instead.";
+      }
+
+      await mutateFacts(ctx.sessionId, (f) => {
+        f.artwork.logoOptions.push(artwork.url);
+      });
+
+      const card: Card = {
+        kind: "logo",
+        options: [artwork.url],
+      };
+      return JSON.stringify({
+        card,
+        next: "Ask whether to use it. Call choose_logo with its URL only once they say yes.",
+      });
+    },
+    {
+      name: "draw_logo",
+      description:
+        "Draw a logo mark for owners who do not have one, or who want an alternative to the one on their page. Pass a short `brief` if they described what they want.",
+      schema: z.object({
+        brief: z
+          .string()
+          .optional()
+          .describe("What the owner asked for, e.g. 'a rooster, bold, red'"),
+      }),
+    },
+  );
+
+  const scanMenuTool = tool(
+    async () => {
+      const before = await mutateFacts(ctx.sessionId, () => {});
+      const scan = await scanMenu(ctx.sessionId, undefined, before.business.name ?? "");
+
+      const facts = await mutateFacts(ctx.sessionId, (f) => {
+        // Merge by section name, so a menu sent as several photos accumulates
+        // instead of the last one replacing the rest.
+        for (const incoming of scan.categories) {
+          const existing = f.catalog.categories.find(
+            (c) => c.name.toLowerCase() === incoming.name.toLowerCase(),
+          );
+          if (existing) {
+            const seen = new Set(existing.items.map((i) => i.name.toLowerCase()));
+            for (const item of incoming.items) {
+              if (!seen.has(item.name.toLowerCase())) existing.items.push(item);
+            }
+          } else {
+            f.catalog.categories.push(incoming);
+          }
+        }
+        f.catalog.source = "upload";
+        if (scan.currency && !f.business.currency) f.business.currency = scan.currency;
+        if (scan.language && !f.business.languages) f.business.languages = [scan.language];
+      });
+
+      const cats = facts.catalog.categories;
+      const total = cats.reduce((n, c) => n + c.items.length, 0);
+
+      const card: Card = {
+        kind: "catalog",
+        title: `I read ${total} items across ${cats.length} sections`,
+        ...(facts.business.currency ? { currency: facts.business.currency } : {}),
+        categories: cats.map((c) => ({
+          name: c.name,
+          ...(c.iconUrl ? { iconUrl: c.iconUrl } : {}),
+          items: c.items.map((i) => ({
+            name: i.name,
+            ...(i.price === undefined ? {} : { price: i.price }),
+            ...(i.imageUrl ? { imageUrl: i.imageUrl } : {}),
+          })),
+        })),
+      };
+
+      return JSON.stringify({
+        card,
+        categories: cats.length,
+        items: total,
+        currency: facts.business.currency ?? null,
+        unreadable: scan.unreadable,
+        next:
+          `The catalog is SAVED and on screen: ${total} items in ${cats.length} sections. ` +
+          "Say what you read — the number of sections and items, and one or two section " +
+          "names so they can tell you actually read it. " +
+          (scan.unreadable.length > 0
+            ? `Name what you could not make out (${scan.unreadable.join("; ")}) and ask for that part only. `
+            : "") +
+          "Then ask if it looks right or if there is another page. When they confirm, call set_catalog with NO arguments.",
+      });
+    },
+    {
+      name: "scan_menu",
+      description:
+        "Read the menu photographs the owner has already uploaded and save every item into the catalog. Takes no arguments — it finds their uploads itself. Call this the moment a menu photo arrives; do NOT retype the items yourself through review_catalog, and do not reply first and scan later.",
+      schema: z.object({}),
+    },
+  );
+
   const setBranches = tool(
     async ({ branches }) => {
       await mutateFacts(ctx.sessionId, (facts) => {
         facts.locations.branches = branches;
         facts.phase = "assembly";
       });
-      return `Saved ${branches.length} location(s). Next: everything needed is collected — summarise it and ask whether they are ready for you to build the app.`;
+      return (
+        `Saved ${branches.length} location(s). ` +
+        (branches.length === 1
+          ? "Ask whether they have any other branches before moving on — call this again with the full list if they do. "
+          : "") +
+        "Once they confirm that is all of them: summarise everything collected and ask whether they are ready for you to build the app."
+      );
     },
     {
       name: "set_branches",
@@ -407,6 +770,7 @@ export function buildTools(ctx: ToolContext) {
       const business = facts.business;
       if (!business.name) throw new Error("The business name is not set yet.");
 
+      report({ label: `Creating "${business.name}" in Mobstep` });
       const created = await drupal.createApp({
         uid: ctx.uid,
         name: business.name,
@@ -427,6 +791,7 @@ export function buildTools(ctx: ToolContext) {
       });
 
       if (facts.brand.palette) {
+        report({ label: "Applying your colours across the app" });
         const p = facts.brand.palette;
         // Design-system tokens, not individual keys: 755 of the app's colour
         // keys reference these, so this is what actually repaints the app.
@@ -449,6 +814,7 @@ export function buildTools(ctx: ToolContext) {
       }
 
       if (facts.brand.logoUrl) {
+        report({ label: "Attaching your logo and app icon" });
         // Non-fatal: an unreachable image must not lose the whole app. The
         // owner can re-upload from the dashboard.
         try {
@@ -459,15 +825,55 @@ export function buildTools(ctx: ToolContext) {
         }
       }
 
+      // Branches first, then the catalog against them. Drupal attaches every
+      // category to the branch ids it is handed, so a catalog created before
+      // the branches exist belongs to nothing and shows up in no branch's menu.
+      report({ label: "Creating your branches" });
       const branchIds = facts.locations.branches.length
         ? (await drupal.createBranches(appId, facts.locations.branches)).branches
         : [];
 
       if (facts.catalog.categories.length) {
-        await drupal.createCatalog(appId, facts.catalog.categories, branchIds);
+        const items = facts.catalog.categories.reduce((n, c) => n + c.items.length, 0);
+        report({
+          label: `Building ${facts.catalog.categories.length} categories and ${items} items`,
+        });
+
+        // The placeholder is applied here rather than at extraction time so it
+        // covers whatever the catalog looks like at assembly — including items
+        // added after the artwork was generated.
+        const placeholder = facts.artwork.placeholderUrl;
+        await drupal.createCatalog(
+          appId,
+          facts.catalog.categories.map((category) => ({
+            name: category.name,
+            ...(category.iconUrl ? { image: category.iconUrl } : {}),
+            items: category.items.map((item) => ({
+              name: item.name,
+              ...(item.price === undefined ? {} : { price: item.price }),
+              ...(item.description ? { description: item.description } : {}),
+              ...(item.imageUrl ?? placeholder ? { image: item.imageUrl ?? placeholder } : {}),
+            })),
+          })),
+          branchIds,
+        );
       }
 
-      return `App #${appId} assembled as package "${created.package}" with ${branchIds.length} location(s).`;
+      const artwork = [
+        facts.catalog.categories.filter((c) => c.iconUrl).length,
+        facts.catalog.categories.reduce(
+          (n, c) => n + c.items.filter((i) => i.imageUrl).length,
+          0,
+        ),
+      ];
+
+      return (
+        `App #${appId} assembled as package "${created.package}": ` +
+        `${branchIds.length} location(s), ` +
+        `${facts.catalog.categories.length} categories with ${artwork[0]} icons, ` +
+        `${facts.catalog.categories.reduce((n, c) => n + c.items.length, 0)} items ` +
+        `(${artwork[1]} photographed, the rest on the placeholder).`
+      );
     },
     {
       name: "assemble_app",
@@ -541,9 +947,14 @@ export function buildTools(ctx: ToolContext) {
     chooseTheme,
     showLogoOptions,
     chooseLogo,
+    scanMenuTool,
     reviewCatalog,
     addItems,
     setCatalog,
+    drawCategoryIcons,
+    drawItemPhotos,
+    drawPlaceholder,
+    drawLogo,
     setBranches,
     assembleApp,
     startBuild,

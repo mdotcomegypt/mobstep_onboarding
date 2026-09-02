@@ -35,8 +35,23 @@ export interface BusinessFacts {
   languages?: string[];
 }
 
+export interface CatalogItem {
+  name: string;
+  price?: number;
+  description?: string;
+  /** A generated photograph, when this item got one. */
+  imageUrl?: string;
+}
+
+export interface CatalogCategory {
+  name: string;
+  /** A generated icon, in the brand colour. */
+  iconUrl?: string;
+  items: CatalogItem[];
+}
+
 export interface CatalogDraft {
-  categories: Array<{ name: string; items: Array<{ name: string; price?: number; description?: string }> }>;
+  categories: CatalogCategory[];
   source?: "site" | "upload" | "chat";
 }
 
@@ -48,6 +63,20 @@ export interface BranchDraft {
   coverage?: Array<{ area: string; price: number }>;
 }
 
+/**
+ * Everything the app is dressed in.
+ *
+ * Kept beside the catalog rather than inside it because the placeholder belongs
+ * to the app as a whole, and because assembly needs to hand Drupal a single
+ * answer to "what image does an item with no image get".
+ */
+export interface Artwork {
+  /** Stands in for every item without a photograph of its own. */
+  placeholderUrl?: string;
+  /** Generated logo candidates, most recent last. */
+  logoOptions: string[];
+}
+
 export interface OnboardingFacts {
   business: BusinessFacts;
   brand: {
@@ -55,6 +84,7 @@ export interface OnboardingFacts {
     palette?: Palette;
     suggestions: Palette[];
   };
+  artwork: Artwork;
   catalog: CatalogDraft;
   locations: { branches: BranchDraft[] };
   appId?: number;
@@ -67,6 +97,7 @@ export interface OnboardingFacts {
 export const emptyFacts = (): OnboardingFacts => ({
   business: {},
   brand: { suggestions: [] },
+  artwork: { logoOptions: [] },
   catalog: { categories: [] },
   locations: { branches: [] },
   phase: "discovery",
@@ -84,6 +115,25 @@ export type Card =
   | { kind: "logo"; options: string[]; chosen?: number }
   | { kind: "screen_mock"; url: string; caption?: string }
   | { kind: "table"; title: string; columns: string[]; rows: string[][] }
+  | {
+      /** The catalog, drawn as sections with their icons and item counts. */
+      kind: "catalog";
+      title: string;
+      currency?: string;
+      placeholderUrl?: string;
+      categories: Array<{
+        name: string;
+        iconUrl?: string;
+        items: Array<{ name: string; price?: number; imageUrl?: string }>;
+      }>;
+    }
+  | {
+      /** A generated set: icons, item photographs, logo candidates. */
+      kind: "gallery";
+      title: string;
+      caption?: string;
+      images: Array<{ url: string; label?: string; shape?: "icon" | "photo" | "tile" }>;
+    }
   | { kind: "progress"; label: string; status: "running" | "success" | "failed"; log?: string }
   | { kind: "link"; label: string; href: string }
   | { kind: "attachment"; url: string; filename: string; mime: string }

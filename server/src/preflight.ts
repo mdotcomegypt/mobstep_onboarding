@@ -171,9 +171,88 @@ await record("Vertex AI", async () => {
         `Vertex AI API is not enabled. Run: gcloud services enable aiplatform.googleapis.com --project ${env.vertex.project}`,
       );
     }
+    // The trap this names cost real time: a key that authenticates perfectly
+    // but belongs to a different project 403s on every call, and the message
+    // Google returns is about the *model*, so it reads as a model problem. The
+    // two project names side by side make it obvious in one line.
+    if (response.status === 403) {
+      const owner = sa.project_id ?? "unknown";
+      throw new Error(
+        `${sa.client_email} is not allowed to call Vertex on project "${env.vertex.project}" ` +
+          `(the key names project "${owner}"). Grant it roles/aiplatform.user there, ` +
+          "or point GOOGLE_APPLICATION_CREDENTIALS at a key that has it.",
+      );
+    }
     throw new Error(message.slice(0, 160));
   }
   return `${env.vertex.chatModel} @ ${env.vertex.location} responded`;
+});
+
+/**
+ * The image model, in every region it is allowed to use.
+ *
+ * Separate from the chat check because it fails separately: image quota is
+ * granted per region and is far tighter, so a deployment can hold a perfectly
+ * good conversation and still be unable to draw a single category icon. A 429
+ * here is not a failure — it means the region works and is merely busy, which
+ * is exactly what the rotation exists to handle.
+ */
+await record("Vertex image regions", async () => {
+  const locations = (process.env["VERTEX_IMAGE_LOCATIONS"] ?? "global,us-east4,europe-west4")
+    .split(",")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const { accessToken } = await import("./lib/vertex.ts");
+  const token = await accessToken();
+  const verdicts: string[] = [];
+  let usable = 0;
+
+  for (const location of locations) {
+    const imageHost =
+      location === "global"
+        ? "aiplatform.googleapis.com"
+        : `${location}-aiplatform.googleapis.com`;
+    try {
+      const probe = await fetch(
+        `https://${imageHost}/v1/projects/${env.vertex.project}/locations/${location}` +
+          `/publishers/google/models/${env.vertex.imageModel}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "A solid grey square." }] }],
+            generationConfig: { responseModalities: ["IMAGE"] },
+          }),
+          signal: AbortSignal.timeout(60_000),
+        },
+      );
+
+      if (probe.ok) {
+        verdicts.push(`${location} ok`);
+        usable += 1;
+      } else if (probe.status === 429) {
+        // Busy, not broken.
+        verdicts.push(`${location} busy`);
+        usable += 1;
+      } else {
+        verdicts.push(`${location} ${probe.status}`);
+      }
+    } catch {
+      verdicts.push(`${location} unreachable`);
+    }
+  }
+
+  if (usable === 0) {
+    throw new Error(
+      `no usable image region (${verdicts.join(", ")}). Category icons and item ` +
+        "photos will be skipped; the catalog still builds without them.",
+    );
+  }
+  return `${usable}/${locations.length} usable — ${verdicts.join(", ")}`;
 });
 
 const pad = Math.max(...results.map((r) => r.name.length));

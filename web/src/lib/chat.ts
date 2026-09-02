@@ -14,11 +14,32 @@ export interface Palette {
   border: string;
 }
 
+export interface CatalogCard {
+  kind: "catalog";
+  title: string;
+  currency?: string;
+  placeholderUrl?: string;
+  categories: Array<{
+    name: string;
+    iconUrl?: string;
+    items: Array<{ name: string; price?: number; imageUrl?: string }>;
+  }>;
+}
+
+export interface GalleryCard {
+  kind: "gallery";
+  title: string;
+  caption?: string;
+  images: Array<{ url: string; label?: string; shape?: "icon" | "photo" | "tile" }>;
+}
+
 export type Card =
   | { kind: "palette"; options: Palette[] }
   | { kind: "logo"; options: string[] }
   | { kind: "screen_mock"; url: string; caption?: string }
   | { kind: "table"; title: string; columns: string[]; rows: string[][] }
+  | CatalogCard
+  | GalleryCard
   | { kind: "progress"; label: string; status: "running" | "success" | "failed"; log?: string }
   | { kind: "link"; label: string; href: string }
   | { kind: "attachment"; url: string; filename: string; mime: string }
@@ -36,15 +57,28 @@ export type Card =
 export interface PreviewFacts {
   name: string | null;
   type: string | null;
+  currency: string | null;
   logoUrl: string | null;
   palette: Palette | null;
   themeId: number | null;
+  placeholderUrl: string | null;
   branches: number;
+  appId: number | null;
   categories: Array<{
     name: string;
-    items: Array<{ name: string; price: number | null }>;
+    iconUrl: string | null;
+    items: Array<{ name: string; price: number | null; imageUrl: string | null }>;
     total: number;
   }>;
+}
+
+/** A live progress line from inside a running tool. */
+export interface Status {
+  label: string;
+  fraction?: number;
+  step?: number;
+  total?: number;
+  done?: boolean;
 }
 
 export interface UploadedFile {
@@ -58,7 +92,9 @@ export interface ChatHandlers {
   onToken: (text: string) => void;
   onCard: (card: Card) => void;
   onTool: (name: string) => void;
+  onStatus: (status: Status) => void;
   onToolDone: (name: string) => void;
+  onRetry: (info: { attempt: number; of: number; message: string }) => void;
   onDone: (info: { phase: string; appId: number | null; facts: PreviewFacts }) => void;
   onError: (message: string, detail?: string) => void;
 }
@@ -142,6 +178,12 @@ export async function streamTurn(
           break;
         case "tool":
           handlers.onTool((parsed as { name: string }).name);
+          break;
+        case "status":
+          handlers.onStatus(parsed as Status);
+          break;
+        case "retry":
+          handlers.onRetry(parsed as { attempt: number; of: number; message: string });
           break;
         case "tool_done":
           handlers.onToolDone((parsed as { name: string }).name);

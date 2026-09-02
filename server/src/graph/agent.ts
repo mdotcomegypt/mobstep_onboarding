@@ -4,6 +4,7 @@ import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { env } from "../lib/env.ts";
+import { withVertexSlot } from "../lib/gate.ts";
 import { trace } from "../lib/trace.ts";
 import { sanitizeHistory, hasRenderableContent } from "../lib/messages.ts";
 import { loadFacts } from "./facts.ts";
@@ -42,7 +43,15 @@ function model() {
     model: env.vertex.chatModel,
     location: env.vertex.location,
     temperature: 0.4,
-    maxOutputTokens: 2048,
+    // 2048 was too small, and the way it failed was invisible. A tool call
+    // carrying a real menu — 93 items on the Rosto sheet — is several thousand
+    // output tokens on its own, and when the budget ran out mid-call Gemini
+    // returned an EMPTY candidate rather than a truncated one. The owner saw
+    // "I lost my train of thought" twice in a row, with nothing anywhere
+    // pointing at the cause. Menu extraction has since moved to its own call
+    // (lib/menu.ts) with its own budget, but the headroom stays: a turn that
+    // sets a catalog, names branches and answers a question is not small.
+    maxOutputTokens: 8192,
 
     // Own the retry policy rather than inheriting LangChain's default of six
     // attempts with exponential backoff. Vertex 429s under bursty load, and
@@ -86,8 +95,15 @@ export async function buildGraph(ctx: ToolContext) {
     ];
     // A hard deadline the agent owns. Without it a stalled Vertex request holds
     // the SSE stream open until the browser gives up, and the owner sees an
-    // indicator that never resolves.
-    const reply = await llm.invoke(messages, { signal: AbortSignal.timeout(45_000) });
+    // indicator that never resolves. Raised from 45s once calls began queueing
+    // behind the gate: the deadline has to cover the wait as well as the work,
+    // and killing a request that was merely third in line is self-defeating.
+    // Through the same gate as image generation and menu extraction. The
+    // conversation is not privileged: an icon batch that 429s the owner's next
+    // reply is worse than an icon batch that takes ten seconds longer.
+    const reply = await withVertexSlot("chat", () =>
+      llm.invoke(messages, { signal: AbortSignal.timeout(90_000) }),
+    );
 
     // Sanitize on the way IN, not just on the way out. An assistant message
     // with no text and no tool calls serializes to a zero-parts entry, which

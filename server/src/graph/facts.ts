@@ -10,12 +10,36 @@ import { emptyFacts, type OnboardingFacts } from "./state.ts";
  * rewrite.
  */
 
+/**
+ * Fills in anything a stored record predates.
+ *
+ * The facts are one JSONB blob, so a row written before a field existed comes
+ * back without it — and the tools reach straight into nested objects
+ * (`facts.artwork.logoOptions.push(...)`). Merging against the empty shape on
+ * every read means a schema addition can never turn an in-flight conversation
+ * into a TypeError halfway through.
+ */
+function withDefaults(stored: Partial<OnboardingFacts> | null): OnboardingFacts {
+  const base = emptyFacts();
+  if (!stored) return base;
+
+  return {
+    ...base,
+    ...stored,
+    business: { ...base.business, ...stored.business },
+    brand: { ...base.brand, ...stored.brand },
+    artwork: { ...base.artwork, ...stored.artwork },
+    catalog: { ...base.catalog, ...stored.catalog },
+    locations: { ...base.locations, ...stored.locations },
+  };
+}
+
 export async function loadFacts(sessionId: number): Promise<OnboardingFacts> {
   const row = await one<{ facts: OnboardingFacts }>(
     "SELECT facts FROM onboarding_facts WHERE session_id = $1",
     [sessionId],
   );
-  return row?.facts ?? emptyFacts();
+  return withDefaults(row?.facts ?? null);
 }
 
 export async function saveFacts(

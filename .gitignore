@@ -11,3 +11,6 @@ dist/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Simulation output: transcripts, generated artwork, captured Drupal payloads.
+server/sim/out/

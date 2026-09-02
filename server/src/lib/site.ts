@@ -25,6 +25,35 @@ export interface SiteSnapshot {
   text: string;
 }
 
+const NAMED: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  "#39": "'",
+};
+
+/**
+ * Turns HTML entities back into the characters they stand for.
+ *
+ * Not cosmetic. Facebook serves an Arabic page title as a run of numeric
+ * entities — `&#x645;&#x637;&#x639;&#x645;` for "مطعم" — and the old code
+ * decoded exactly two named entities and left the rest. That string went into
+ * the business description, into the facts record, and would have gone into the
+ * app: the owner's own shop described in mojibake. Anything read off a page has
+ * to be decoded before it is stored.
+ */
+export function decodeEntities(input: string): string {
+  return input
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+    .replace(/&([a-z]+|#\d+);/gi, (match, name: string) => NAMED[name.toLowerCase()] ?? match);
+}
+
 function absolute(href: string, base: string): string | null {
   try {
     return new URL(href, base).toString();
@@ -148,17 +177,24 @@ export async function fetchSite(raw: string): Promise<SiteSnapshot> {
     .filter((hex) => hex !== "#ffffff" && hex !== "#000000")
     .slice(0, 8);
 
-  const text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+  const text = decodeEntities(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " "),
+  )
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, MAX_TEXT);
 
-  return { url: base, title, description, images, colors, text };
+  return {
+    url: base,
+    title: title ? decodeEntities(title) : null,
+    description: description ? decodeEntities(description) : null,
+    images,
+    colors,
+    text,
+  };
 }
 
 /**

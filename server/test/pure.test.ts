@@ -11,6 +11,8 @@ import { describe, it } from "node:test";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 
 import { hasRenderableContent, sanitizeHistory, stripOldImages } from "../src/lib/messages.ts";
+import { eachWithProgress, withProgress } from "../src/lib/progress.ts";
+import { decodeEntities } from "../src/lib/site.ts";
 import { slugify } from "../src/lib/slug.ts";
 import { textOf } from "../src/lib/text.ts";
 
@@ -151,5 +153,106 @@ describe("slugify — package names for this market", () => {
     for (const name of ["Rosto Fried Chicken", "مطعم روستو", "7 Eleven", "!!!", "Café Crème & Co.", "  Bobs   Burgers  "]) {
       assert.match(slugify(name, 42), DRUPAL, `failed for ${name}`);
     }
+  });
+});
+
+describe("decodeEntities — text read off a customer's page", () => {
+  it("decodes hex numeric entities", () => {
+    // The bug: Facebook serves Arabic page titles as runs of numeric entities,
+    // and only &amp; and &nbsp; were decoded. "مطعم روستو" reached the facts
+    // record — and would have reached the app — as raw entity text.
+    assert.equal(decodeEntities("&#x645;&#x637;&#x639;&#x645;"), "مطعم");
+  });
+  it("decodes decimal numeric entities", () => {
+    assert.equal(decodeEntities("&#1605;"), "م");
+  });
+  it("still decodes the named ones", () => {
+    assert.equal(decodeEntities("Fish &amp; Chips&nbsp;Co"), "Fish & Chips Co");
+  });
+  it("leaves unknown entities alone rather than mangling them", () => {
+    assert.equal(decodeEntities("100 &fakeentity; off"), "100 &fakeentity; off");
+  });
+  it("handles text with no entities at all", () => {
+    assert.equal(decodeEntities("Rosto Fried Chicken"), "Rosto Fried Chicken");
+  });
+});
+
+describe("eachWithProgress — batches that must not fail whole", () => {
+  it("keeps going when one item throws, and says which", async () => {
+    // Every batch here is decorative artwork. One 429 on the third icon must
+    // not cost the other five.
+    const results = await eachWithProgress(
+      [1, 2, 3, 4],
+      (n) => `item ${n}`,
+      async (n) => {
+        if (n === 3) throw new Error("429");
+        return n * 10;
+      },
+      { concurrency: 2 },
+    );
+
+    assert.deepEqual(
+      results.map((r) => r.value),
+      [10, 20, null, 40],
+    );
+    assert.equal(results[2]?.error, "429");
+    assert.equal(results.filter((r) => r.error).length, 1);
+  });
+
+  it("keeps results aligned with their inputs under concurrency", async () => {
+    // Two runners finishing out of order must not reorder the results; the
+    // caller matches icons back to categories by position.
+    const results = await eachWithProgress(
+      ["a", "b", "c", "d", "e"],
+      (s) => s,
+      async (s, i) => {
+        await new Promise((r) => setTimeout(r, i % 2 === 0 ? 12 : 1));
+        return s.toUpperCase();
+      },
+      { concurrency: 3 },
+    );
+    assert.deepEqual(
+      results.map((r) => r.value),
+      ["A", "B", "C", "D", "E"],
+    );
+    assert.deepEqual(results.map((r) => r.item), ["a", "b", "c", "d", "e"]);
+  });
+
+  it("reports a monotonic completed count", async () => {
+    // The counter used to report the index of whatever had just STARTED, so
+    // with two runners it went 1, 2, 1, 3, 2 while the labels named different
+    // sections. A progress indicator that goes backwards is worse than none.
+    const seen: number[] = [];
+    await withProgress(
+      (u) => {
+        if (u.step !== undefined) seen.push(u.step);
+      },
+      () =>
+        eachWithProgress(
+          [1, 2, 3, 4],
+          (n) => `n${n}`,
+          async (n) => {
+            await new Promise((r) => setTimeout(r, n % 2 ? 8 : 2));
+            return n;
+          },
+          { concurrency: 2 },
+        ),
+    );
+
+    assert.ok(seen.length > 0, "expected progress updates");
+    for (let i = 1; i < seen.length; i += 1) {
+      assert.ok(
+        (seen[i] as number) >= (seen[i - 1] as number),
+        `progress went backwards: ${seen.join(",")}`,
+      );
+    }
+    assert.equal(seen.at(-1), 4);
+  });
+
+  it("drops updates when nothing is listening", async () => {
+    // Tools are also called outside a turn — by tests, and by the simulation
+    // harness. No sink must never mean a crash.
+    const results = await eachWithProgress([1], () => "x", async (n) => n);
+    assert.equal(results[0]?.value, 1);
   });
 });

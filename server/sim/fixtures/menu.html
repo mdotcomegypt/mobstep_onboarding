@@ -1,0 +1,168 @@
+<meta charset="utf-8">
+<title>Rosto menu</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; font-family: 'Cairo', 'Tahoma', sans-serif; direction: rtl; }
+  .page { width: 1400px; padding: 18px; }
+  .hdr { display: flex; align-items: stretch; gap: 0; margin-bottom: 10px; }
+  .hdr .photo { width: 660px; height: 145px; background:
+      radial-gradient(circle at 30% 40%, #e8b563 0 60px, transparent 61px),
+      radial-gradient(circle at 55% 55%, #c9762f 0 90px, transparent 91px),
+      linear-gradient(135deg,#2b2b2b,#161616);
+      position: relative; overflow: hidden; }
+  .hdr .photo::after { content:''; position:absolute; inset:14px 40px 14px 40px; border-radius:50%;
+      background: radial-gradient(circle at 50% 50%, #f0c877 0 42%, #d98b34 43% 70%, #b5641f 71% 100%);
+      box-shadow: inset 0 0 30px #8a4a12; }
+  .hdr .title { flex: 1; background: #e2231a; color: #fff; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 8px 20px; }
+  .hdr .title h1 { margin: 0; font-size: 40px; font-weight: 900; letter-spacing: 1px; }
+  .hdr .title h2 { margin: 0; font-size: 30px; font-weight: 700; font-style: italic; direction: ltr; letter-spacing: 3px; }
+  .hdr .pad { width: 210px; background: #8d8d8d; }
+
+  .cols { display: flex; gap: 14px; align-items: flex-start; }
+  .col { flex: 1; }
+  .sizes { display: flex; gap: 0; font-size: 26px; font-weight: 700; color: #222; margin-bottom: 2px; padding-right: 4px; }
+  .sizes span { width: 76px; text-align: center; }
+
+  .row { display: flex; align-items: flex-start; border-bottom: 0; padding: 3px 0; }
+  .row .p { width: 76px; text-align: center; font-size: 25px; font-weight: 700; padding-top: 2px; }
+  .row .p.l { color: #1a1a1a; }
+  .row .p.m { color: #e2231a; }
+  .row .p.s { color: #1a1a1a; }
+  .row .n { flex: 1; text-align: right; padding-right: 10px; }
+  .row .n b { display: block; font-size: 25px; font-weight: 900; color: #111; line-height: 1.15; }
+  .row .n i { display: block; font-size: 15px; font-weight: 700; color: #e2231a; font-style: normal; line-height: 1.25; }
+
+  .crust { background: #e2231a; color: #fff; display: flex; align-items: center; justify-content: space-between;
+      padding: 5px 14px; margin-top: 6px; font-weight: 900; font-size: 22px; }
+  .crust .plus { display: flex; gap: 26px; font-style: italic; }
+
+  .band { margin-top: 16px; }
+  .band .cap { background: #e2231a; color: #fff; font-weight: 900; font-size: 27px; padding: 5px 16px;
+      display: flex; justify-content: space-between; align-items: center; }
+  .band .cap .en { font-style: italic; direction: ltr; }
+  .band.dark .cap { background: #1c1c1c; }
+
+  table.list { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  table.list td { padding: 3px 10px; font-size: 20px; font-weight: 700; color: #111; }
+  table.list td.pr { width: 62px; text-align: center; color: #e2231a; font-weight: 900; }
+  table.list tr:nth-child(odd) { background: #ececec; }
+
+  .lower { display: flex; gap: 14px; align-items: flex-start; margin-top: 14px; }
+  .lower > div { flex: 1; }
+  .two { display: flex; gap: 10px; }
+  .two > div { flex: 1; }
+  .plates { width: 300px; display: flex; flex-direction: column; gap: 10px; }
+  .plate { height: 128px; background: linear-gradient(160deg,#f2efe9,#ddd6c8); position: relative; }
+  .plate::after { content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width: 120px; height: 78px; border-radius: 8px;
+      background: radial-gradient(circle at 40% 40%, #f6d488 0 40%, #d79b3c 41% 100%); }
+
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 20px; font-weight: 900; }
+  .foot .svc { background: #e2231a; color: #fff; padding: 4px 18px; }
+</style>
+
+<div class="page">
+  <div class="hdr">
+    <div class="photo"></div>
+    <div class="title"><h1>بيتزا روستو</h1><h2>Rosto Pizza</h2></div>
+    <div class="pad"></div>
+  </div>
+
+  <div class="cols">
+    <!-- RIGHT column -->
+    <div class="col">
+      <div class="sizes"><span>L</span><span>M</span><span>S</span></div>
+      <div id="right"></div>
+    </div>
+    <!-- LEFT column -->
+    <div class="col">
+      <div style="height:34px"></div>
+      <div id="left"></div>
+      <div class="crust"><span class="plus"><i>+30</i><i>+24</i><i>+16</i></span><span>محشية الأطراف</span></div>
+    </div>
+  </div>
+
+  <div class="lower">
+    <div>
+      <div class="band"><div class="cap"><span>عشاق الموتزريلا</span></div>
+        <table class="list" id="mozz"></table></div>
+    </div>
+    <div class="plates"><div class="plate"></div><div class="plate"></div><div class="plate"></div></div>
+    <div>
+      <div class="band"><div class="cap"><span>المناقيش</span><span class="en">Manakeesh</span></div>
+        <div class="two">
+          <table class="list" id="man2"></table>
+          <table class="list" id="man1"></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lower">
+    <div class="band dark"><div class="cap"><span>عشاق الحلويات</span></div><table class="list" id="sweet"></table></div>
+    <div class="band dark"><div class="cap"><span>الفطائر</span></div><table class="list" id="pies"></table></div>
+    <div class="band dark"><div class="cap"><span>الكرافت</span></div><table class="list" id="kraft"></table></div>
+  </div>
+
+  <div class="foot">
+    <span>الاسعار شاملة ضريبة القيمة المضافة</span>
+    <span class="svc">يضاف ١٢ % خدمة داخل الصالة</span>
+  </div>
+</div>
+
+<script>
+const right = [
+ ["بيتزا مارغريتا","صوص الطماطم + موزريلا + اوريكانو",220,160,110],
+ ["بيتزا فور سيزون","زيتون + خضار + موزريلا + مشروم",235,170,115],
+ ["بيتزا كواتروفورماتجي","زيتون + موزريلا + حلوم + شيدر + قشقوان",235,170,115],
+ ["بيتزا هالبينو","موزريلا + مشروم + زيتون + هالبينو + روستو هوت صوص",245,175,120],
+ ["بيتزا تكساس","روستو مدخن + موزريلا + فلفل اخضر + صوص التكساس",245,175,120],
+ ["بيتزا الماك","موزريلا + فراخ قطع + ماشروم + صوص الماك",245,175,120],
+ ["بيتزا تشيزي كريم","زيتون + موزريلا + خضار + مشروم + صوص الجبنة السائلة",245,175,120],
+ ["بيتزا رانش","موزريلا + مشروم + خضار + قطع فراخ بيناكا + صوص الرانش",245,175,120],
+ ["بيتزا كريمي مدخن","موزريلا + تركي مدخن + مشروم + فلفل + زيتون + صوص جبنة سائلة",245,175,120],
+ ["بيتزا الأونيون","بصل + بسطرما + موزريلا + جبنة سائلة + فلفل",245,175,120],
+ ["بيتزا روستو","زيتون + موزريلا + خضار + نوعين من اللحم المدخن + مشروم",245,175,120],
+ ["بيتزا كينج","موزريلا + خضار + لحم",245,175,120],
+ ["بيتزا سلامي","موزريلا + خضار + مشروم + سلامي",245,175,120],
+ ["بيتزا بيانكا","موزريلا + خضار + مشروم + شيش طاووق",245,175,120],
+ ["بيتزا السجق","موزريلا + خضار + مشروم + سجق",245,175,120],
+ ["بيتزا بيبروني","موزريلا + خضار + مشروم + بيبروني",245,175,120],
+ ["بيتزا صيامي","صلصة + مشروم + فلفل + زيتون + بطاطس + اوريجانو",245,175,120],
+];
+const left = [
+ ["سوبر سوبريم بيتزا","سلامي + بيروني + مشروم + خضار + موزريلا",245,175,120],
+ ["بيتزا ميلانو","زيتون + موزريلا + مشروم + تركي مدخن",245,175,120],
+ ["بيتزا سموك تركي","زيتون + موزريلا + خضار + مشروم + تركي مدخن",245,175,120],
+ ["بيتزا فاهيتا","دجاج متبل + ذرة + بصل + مشروم + موزريلا",245,175,120],
+ ["بيتزا هوت دوغ","موزريلا + خضار + مشروم + زيتون + هوت دوغ",245,175,120],
+ ["بيتزا لانشون","خضار مشكلة + موزريلا + لانشون",245,175,120],
+ ["بيتزا بسطرمة","موزريلا + خضار + زيتون + بسطرمة",245,175,120],
+ ["بيتزا مشروم","موزريلا + خضار + مشروم",245,175,120],
+ ["بيتزا زنجر","صوص البيتزا + موزريلا + قطع زنجر",255,180,125],
+ ["بيتزا شاورما فراخ","موزريلا + خضار + مشروم + شاورما",260,185,130],
+ ["بيتزا شاورما لحمة","موزريلا + خضار + مشروم + شاورما",275,195,140],
+ ["بيتزا سي فود","موزريلا + جمبري + كابوريا",275,195,140],
+ ["بيتزا جامبريتو","موزريلا + جمبري",290,210,145],
+ ["بيتزا تونا","موزريلا + بصل + خضار + تونة",295,220,"–"],
+];
+const mozz = [["محمرة موتزريلا",25],["زعتر موتزريلا",25],["محمرة زعتر موتزريلا",25],["زيتون موتزريلا",25],["مشروم موتزريلا",25],["مشروم زيتون موتزريلا",30],["سبانخ موتزريلا",25],["لانشون موتزريلا",35],["سلامي موتزريلا",35],["شاورما موتزريلا",40],["سوسيس موتزريلا",38],["لحمة موتزريلا",33],["تشيكن موتزريلا",35],["شرحات دجاج موتزريلا",42],["بسطرمة موتزريلا",42],["سموك تركي موتزريلا",35],["توشكا (سجق موتزريلا)",35],["مكسيكي موتزريلا",35],["رانش تشكن موتزريلا",38]];
+const man1 = [["جبنة شامية بقدونس",17],["جبنة شامية سادة",17],["جبنة لافاش كيري",22],["جبنة رومي",22],["جبنة شيدر",22],["جبنة موتزريلا",22],["جبنة حلوم",22],["جبنة بيضا",17],["مشكل اجبان",17],["جبنة بيضا زيتون",19],["جبنة حلوم زيتون",20],["جبنة بيضا حار",22],["محمرة",17],["زعتر",14]];
+const man2 = [["محمرة زعتر",16],["سبانخ",16],["زيتون",20],["لبنة",16],["لبنة زعتر",17],["بيض",18],["سنفورة",18],["لانشون",24],["بيتزا سواريه",21],["سوسيس",28],["سجق",28],["صفيحة",28],["شرحات دجاج",35],["صفيحة ارمنية",33]];
+const kraft = [["جبنة كرافت",24],["كرافت لانشون",35],["كرافت سوسيس",35],["كرافت سلامي",35],["كرافت سموك تركي",35],["كرافت بسطرمة",35]];
+const pies = [["فطيرة بيض",29],["فطيرة لحم بالبيض",35],["فطيرة سجق بالبيض",35],["فطيرة مشروم بالبيض",38],["فطيرة سوسيس بالبيض",35],["فطيرة كرافت بالبيض",28]];
+const sweet = [["شوكولاتة",23],["شوكولاتة موز",28],["كرافت بالعسل",25]];
+
+const pz = (rows) => rows.map(([n,d,l,m,s]) =>
+  `<div class="row"><div class="p l">${l}</div><div class="p m">${m}</div><div class="p s">${s}</div>
+   <div class="n"><b>${n}</b><i>${d}</i></div></div>`).join("");
+document.getElementById("right").innerHTML = pz(right);
+document.getElementById("left").innerHTML  = pz(left);
+
+const tb = (rows) => rows.map(([n,p]) => `<tr><td class="pr">${p}</td><td>${n}</td></tr>`).join("");
+for (const [id, rows] of Object.entries({mozz, man1, man2, kraft, pies, sweet})) {
+  document.getElementById(id).innerHTML = tb(rows);
+}
+</script>

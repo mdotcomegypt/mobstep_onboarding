@@ -5,6 +5,7 @@ import { CARD_TOOLS } from "../graph/tools.ts";
 import type { Card, OnboardingFacts } from "../graph/state.ts";
 import { query } from "../db/index.ts";
 import { listUploads, loadUpload, publicUrl } from "../lib/uploads.ts";
+import { withProgress } from "../lib/progress.ts";
 import { brief, newTurnId, trace } from "../lib/trace.ts";
 import { textOf } from "../lib/text.ts";
 import { requireVerified } from "./guard.ts";
@@ -16,11 +17,20 @@ import { requireVerified } from "./guard.ts";
  * spends ten or twenty seconds fetching a website or assembling an app, and a
  * silent spinner for that long reads as a hang.
  *
- * Three event types reach the browser:
- *   token  — a fragment of assistant prose, appended as it arrives
- *   card   — a structured preview (palette, logo, table, progress, link)
- *   done   — end of turn, carrying the updated phase
- *   error  — something failed; the message is safe to show
+ * Events that reach the browser:
+ *   token     — a fragment of assistant prose, appended as it arrives
+ *   card      — a structured preview (palette, logo, catalog, gallery, progress)
+ *   tool      — a tool started; the client names it
+ *   status    — what that tool is doing *right now*, item by item
+ *   tool_done — that tool finished
+ *   retry     — the turn hit a transient failure and is being attempted again
+ *   done      — end of turn, carrying the updated phase
+ *   error     — something failed for good; the message is safe to show
+ *
+ * `status` is the one that matters most. A tool call is otherwise opaque for as
+ * long as it runs, and generating a set of category icons runs for a minute or
+ * more. A spinner held for a minute is indistinguishable from a hang, and the
+ * owner reloads — which loses the turn and starts the same minute again.
  */
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   /** Transcript for reconnects and reloads. */
@@ -64,6 +74,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     const heartbeat = setInterval(() => reply.raw.write(": ping\n\n"), 15_000);
 
     let assistantText = "";
+    // The last thing a tool said it was doing, so a failure can name where it
+    // got to instead of reporting a bare stack. Held in an object because it is
+    // only ever assigned from inside a callback, and TypeScript's control-flow
+    // analysis cannot see that — it narrows a bare `let` to `null` and then
+    // types the truthy branch as `never`.
+    const progress = { label: null as string | null };
     const cards: Card[] = [];
     const turnId = newTurnId();
     const startedAt = Date.now();
@@ -140,17 +156,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         messages: [new HumanMessage({ content: parts })],
       };
 
-      const stream = graph.streamEvents(input, {
-        version: "v2",
-        configurable: { thread_id: threadId(session.id) },
-        recursionLimit: 40,
-      });
-
       // Text streamed per model run, so the end-of-run fallback can tell
       // "this run streamed nothing" from "this run already streamed".
       const streamedByRun = new Map<string, number>();
 
-      for await (const event of stream) {
+      /**
+       * One attempt at the turn.
+       *
+       * Separated out so it can be retried. The retry is safe precisely because
+       * the graph is checkpointed: the human message is already in the thread,
+       * and any tool that ran before the failure has already written its result
+       * to the facts record. Re-entering resumes from the checkpoint rather
+       * than replaying the work.
+       */
+      const runOnce = async (): Promise<void> => {
+        const stream = graph.streamEvents(input, {
+          version: "v2",
+          configurable: { thread_id: threadId(session.id) },
+          recursionLimit: 40,
+        });
+
+        for await (const event of stream) {
         if (event.event === "on_chat_model_stream") {
           const piece = textOf(event.data?.chunk);
           if (piece) {
@@ -211,6 +237,76 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
           trace("tool.start", { name: event.name, args: brief(event.data?.input, 200) }, ctx);
           send("tool", { name: event.name });
         }
+        }
+      };
+
+      /**
+       * Retry the turn on a transient failure, in the open stream.
+       *
+       * Vertex 429s under bursty load and occasionally stalls, and the previous
+       * behaviour — surface the error, show a "Try again" button — put the cost
+       * of the provider's bad minute onto the owner, who has no idea whether
+       * pressing it will duplicate anything. Two silent-but-announced retries
+       * absorb almost all of it.
+       *
+       * What is NOT retried: anything that already produced output. Re-running
+       * a turn that streamed half a sentence would repeat it, and a garbled
+       * duplicate reply is worse than an error.
+       */
+      const transient = (error: unknown): boolean => {
+        const message = error instanceof Error ? error.message : String(error);
+        const name = (error as Error)?.name ?? "";
+        return (
+          name === "TimeoutError" ||
+          name === "AbortError" ||
+          /429|resource[ _]exhausted|quota|rate.?limit|unavailable|503|502|504|deadline|ECONNRESET|ETIMEDOUT|socket hang up|fetch failed/i.test(
+            message,
+          )
+        );
+      };
+
+      const MAX_ATTEMPTS = 4;
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await withProgress(
+            (update) => {
+              progress.label = update.label;
+              send("status", update);
+            },
+            runOnce,
+          );
+          break;
+        } catch (error) {
+          const producedOutput = assistantText.trim() !== "" || cards.length > 0;
+          const canRetry = attempt < MAX_ATTEMPTS && transient(error) && !producedOutput;
+
+          trace("turn.attempt_failed", {
+            attempt,
+            willRetry: canRetry,
+            producedOutput,
+            message: brief(error instanceof Error ? error.message : String(error), 300),
+          }, ctx);
+
+          if (!canRetry) throw error;
+
+          // Say so rather than sitting silent: a ten-second gap with no
+          // explanation is exactly what makes people reload.
+          send("retry", {
+            attempt,
+            of: MAX_ATTEMPTS,
+            message:
+              attempt === 1
+                ? "That took longer than it should — trying again."
+                : attempt === 2
+                  ? "Still busy on our side. Giving it another go."
+                  : "One last try.",
+          });
+          // Exponential with jitter. A Vertex 429 is a quota window measured in
+          // seconds, so retrying 1.2s later just spends the second attempt
+          // hitting the same wall.
+          const wait = Math.round(2_500 * 2 ** (attempt - 1) * (0.7 + Math.random() * 0.6));
+          await new Promise((resolve) => setTimeout(resolve, wait));
+        }
       }
 
       // A turn that produced no words at all is a bug, not a valid reply.
@@ -255,8 +351,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       // small and muted beneath the friendly line.
       const raw = error instanceof Error ? error.message : String(error);
       send("error", {
-        message:
-          "Something went wrong on our side. Try sending that again — I kept everything so far.",
+        message: progress.label
+          ? `Something went wrong while ${progress.label.charAt(0).toLowerCase()}${progress.label.slice(1)}. ` +
+            "Try sending that again — I kept everything up to that point."
+          : "Something went wrong on our side. Try sending that again — I kept everything so far.",
         detail: raw.replace(/\s+/g, " ").slice(0, 400),
       });
     } finally {
@@ -278,13 +376,23 @@ function previewOf(facts: OnboardingFacts) {
   return {
     name: facts.business.name ?? null,
     type: facts.business.type ?? null,
+    currency: facts.business.currency ?? null,
     logoUrl: facts.brand.logoUrl ?? null,
     palette: facts.brand.palette ?? null,
     themeId: facts.themeId ?? null,
+    placeholderUrl: facts.artwork.placeholderUrl ?? null,
     branches: facts.locations.branches.length,
+    appId: facts.appId ?? null,
     categories: facts.catalog.categories.map((c) => ({
       name: c.name,
-      items: c.items.slice(0, 4).map((i) => ({ name: i.name, price: i.price ?? null })),
+      iconUrl: c.iconUrl ?? null,
+      // Four is what the preview's category strip shows; the count carries the
+      // rest. Shipping 120 items on every turn to render four is pure waste.
+      items: c.items.slice(0, 4).map((i) => ({
+        name: i.name,
+        price: i.price ?? null,
+        imageUrl: i.imageUrl ?? null,
+      })),
       total: c.items.length,
     })),
   };

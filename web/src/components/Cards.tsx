@@ -1,4 +1,5 @@
-import type { Card, Palette } from "../lib/chat.ts";
+import { useState } from "react";
+import type { Card, CatalogCard, GalleryCard, Palette } from "../lib/chat.ts";
 
 /**
  * Chat cards.
@@ -10,10 +11,12 @@ import type { Card, Palette } from "../lib/chat.ts";
 export function CardView({
   card,
   onReply,
+  currency = null,
   disabled = false,
 }: {
   card: Card;
   onReply: (text: string) => void;
+  currency?: string | null;
   disabled?: boolean;
 }) {
   switch (card.kind) {
@@ -23,6 +26,10 @@ export function CardView({
       return <LogoCard options={card.options} onReply={onReply} disabled={disabled} />;
     case "themes":
       return <ThemesCard options={card.options} onReply={onReply} disabled={disabled} />;
+    case "catalog":
+      return <CatalogView card={card} currency={currency} />;
+    case "gallery":
+      return <GalleryView card={card} />;
     case "table":
       return <TableCard title={card.title} columns={card.columns} rows={card.rows} />;
     case "progress":
@@ -49,6 +56,103 @@ export function CardView({
   }
 }
 
+const money = (value: number | undefined, currency: string | null): string =>
+  value === undefined ? "—" : currency ? `${value} ${currency}` : String(value);
+
+/**
+ * The catalog, as sections rather than one long table.
+ *
+ * A real menu is a hundred rows. Rendered flat it is unreadable, and the owner
+ * cannot do the one thing they are being asked to do — check it. What they
+ * actually verify is that the *sections* are right and that a few prices in
+ * each look familiar, so sections lead, collapsed, with their counts. Opening
+ * one shows its items.
+ */
+function CatalogView({ card, currency }: { card: CatalogCard; currency: string | null }) {
+  const [open, setOpen] = useState<number | null>(0);
+  const unit = card.currency ?? currency;
+  const total = card.categories.reduce((n, c) => n + c.items.length, 0);
+  const withIcons = card.categories.filter((c) => c.iconUrl).length;
+
+  return (
+    <div className="card-block catalog-card">
+      <div className="catalog-head">
+        <p className="card-title">{card.title}</p>
+        <span className="catalog-meta">
+          {card.categories.length} sections · {total} items
+          {withIcons > 0 && ` · ${withIcons} icons`}
+        </span>
+      </div>
+
+      <ul className="sections">
+        {card.categories.map((category, i) => {
+          const isOpen = open === i;
+          return (
+            <li key={`${category.name}-${i}`} className={isOpen ? "is-open" : ""}>
+              <button
+                type="button"
+                className="section-head"
+                aria-expanded={isOpen}
+                onClick={() => setOpen(isOpen ? null : i)}
+              >
+                <span className="section-icon">
+                  {category.iconUrl ? (
+                    <img src={category.iconUrl} alt="" loading="lazy" />
+                  ) : (
+                    <i className="section-icon-empty" aria-hidden="true" />
+                  )}
+                </span>
+                <span className="section-name">{category.name}</span>
+                <span className="section-count">{category.items.length}</span>
+                <span className="chev" aria-hidden="true" />
+              </button>
+
+              {isOpen && (
+                <ul className="items">
+                  {category.items.map((item, j) => (
+                    <li key={`${item.name}-${j}`}>
+                      <span className="item-thumb">
+                        {(item.imageUrl ?? card.placeholderUrl) && (
+                          <img
+                            src={item.imageUrl ?? card.placeholderUrl}
+                            alt=""
+                            loading="lazy"
+                            className={item.imageUrl ? "" : "is-placeholder"}
+                          />
+                        )}
+                      </span>
+                      <span className="item-name">{item.name}</span>
+                      <span className="item-price">{money(item.price, unit)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** A generated set: icons, sample photographs, a placeholder. */
+function GalleryView({ card }: { card: GalleryCard }) {
+  return (
+    <div className="card-block gallery-card">
+      <p className="card-title">{card.title}</p>
+      {card.caption && <p className="card-sub">{card.caption}</p>}
+      <div className="gallery">
+        {card.images.map((image, i) => (
+          <figure key={`${image.url}-${i}`} className={`shot shot-${image.shape ?? "photo"}`}>
+            <img src={image.url} alt={image.label ?? ""} loading="lazy" />
+            {image.label && <figcaption>{image.label}</figcaption>}
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PaletteCard({
   options,
   onReply,
@@ -60,6 +164,7 @@ function PaletteCard({
 }) {
   return (
     <div className="card-block">
+      <p className="card-title">Pick a colour scheme</p>
       <div className="palette-grid">
         {options.map((p, i) => (
           <button
@@ -69,19 +174,19 @@ function PaletteCard({
             disabled={disabled}
             onClick={() => onReply(`I'll take ${p.name ?? `option ${i + 1}`} (${p.brand}).`)}
           >
-            <div className="swatches">
-              <span style={{ background: p.brand }} />
-              <span style={{ background: p.surface }} />
-              <span style={{ background: p.onSurface }} />
-              <span style={{ background: p.border }} />
-            </div>
+            {/* A miniature of the actual app, not a row of swatches. Four
+                rectangles tell you nothing about whether the text will be
+                readable on the button. */}
             <div className="palette-preview" style={{ background: p.surface, color: p.onSurface }}>
-              <strong>Aa</strong>
-              <span className="pill" style={{ background: p.brand, color: p.onBrand }}>
+              <span className="pp-bar" style={{ background: p.brand }} />
+              <span className="pp-line" style={{ background: p.onSurface, opacity: 0.85 }} />
+              <span className="pp-line short" style={{ background: p.border }} />
+              <span className="pp-cta" style={{ background: p.brand, color: p.onBrand }}>
                 Order now
               </span>
             </div>
             <span className="palette-name">{p.name ?? `Option ${i + 1}`}</span>
+            <span className="palette-hex">{p.brand}</span>
           </button>
         ))}
       </div>
@@ -154,6 +259,7 @@ function LogoCard({
 }) {
   return (
     <div className="card-block">
+      <p className="card-title">{options.length === 1 ? "How's this?" : "Pick a logo"}</p>
       <div className="logo-grid">
         {options.map((url, i) => (
           <button
@@ -203,7 +309,7 @@ function TableCard({
           </tbody>
         </table>
       </div>
-      <p className="muted small">{rows.length} items</p>
+      <p className="muted small">{rows.length} rows</p>
     </div>
   );
 }
@@ -218,13 +324,18 @@ function ProgressCard({
   log?: string;
 }) {
   return (
-    <div className="card-block">
+    <div className={`card-block build-card is-${status}`}>
       <p className="card-title">
         <span className={`chip chip-${status}`}>
           {status === "running" ? "Working" : status === "success" ? "Done" : "Failed"}
         </span>
         {label}
       </p>
+      {status === "running" && (
+        <div className="activity-bar is-indeterminate">
+          <i />
+        </div>
+      )}
       {log && <pre className="log">{log}</pre>}
     </div>
   );
