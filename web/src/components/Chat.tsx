@@ -154,6 +154,20 @@ export function Chat({ session }: { session: SessionView }) {
             </span>
           ))}
         </nav>
+
+        {/* Phones get a bar and the current step's name: six labels do not fit
+            in 360px, and truncated ones convey nothing. */}
+        <div
+          className="phase-bar"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={PHASES.length}
+          aria-valuenow={activeIndex + 1}
+          aria-label={`Step ${activeIndex + 1} of ${PHASES.length}`}
+        >
+          <i style={{ width: `${((activeIndex + 1) / PHASES.length) * 100}%` }} />
+        </div>
+        <span className="phase-now">{PHASES[activeIndex]?.label ?? ""}</span>
         <span className="muted small who">{session.name ?? session.email}</span>
       </header>
 

@@ -20,6 +20,7 @@ import type { Card, Palette } from "./state.ts";
 
 export const CARD_TOOLS = new Set([
   "show_themes",
+  "add_items",
   "propose_palette",
   "review_catalog",
   "show_logo_options",
@@ -224,19 +225,24 @@ export function buildTools(ctx: ToolContext) {
 
   const setCatalog = tool(
     async ({ categories }) => {
-      await mutateFacts(ctx.sessionId, (facts) => {
-        facts.catalog.categories = categories;
-        facts.phase = "locations";
+      const facts = await mutateFacts(ctx.sessionId, (f) => {
+        // Omitting categories confirms whatever add_items has accumulated,
+        // so a long catalog never has to be retyped through the model.
+        if (categories && categories.length > 0) {
+          f.catalog.categories = categories;
+        }
+        f.phase = "locations";
       });
-      const count = categories.reduce((n, c) => n + c.items.length, 0);
-      return `Saved ${categories.length} categories and ${count} items.`;
+      const cats = facts.catalog.categories;
+      const count = cats.reduce((n, c) => n + c.items.length, 0);
+      return `Catalog confirmed: ${cats.length} categories, ${count} items.`;
     },
     {
       name: "set_catalog",
       description:
-        "Save the menu or product catalog. Call review_catalog first and only save once the owner has confirmed it.",
+        "Confirm the catalog once the owner has approved it. Omit `categories` to confirm exactly what add_items already collected — only pass them to replace the whole catalog.",
       schema: z.object({
-        categories: z.array(
+        categories: z.optional(z.array(
           z.object({
             name: z.string(),
             items: z.array(
@@ -247,7 +253,7 @@ export function buildTools(ctx: ToolContext) {
               }),
             ),
           }),
-        ),
+        )),
       }),
     },
   );
@@ -269,6 +275,60 @@ export function buildTools(ctx: ToolContext) {
       name: "review_catalog",
       description:
         "Show the owner the catalog you have extracted, as a table, before saving it.",
+      schema: z.object({
+        categories: z.array(
+          z.object({
+            name: z.string(),
+            items: z.array(
+              z.object({
+                name: z.string(),
+                price: z.number().optional(),
+                description: z.string().optional(),
+              }),
+            ),
+          }),
+        ),
+      }),
+    },
+  );
+
+  const addItems = tool(
+    async ({ categories }) => {
+      const facts = await mutateFacts(ctx.sessionId, (f) => {
+        // Merge by category name so a second menu photo extends the catalog
+        // instead of replacing what the first one produced.
+        for (const incoming of categories) {
+          const existing = f.catalog.categories.find(
+            (c) => c.name.toLowerCase() === incoming.name.toLowerCase(),
+          );
+          if (existing) {
+            const seen = new Set(existing.items.map((i) => i.name.toLowerCase()));
+            for (const item of incoming.items) {
+              if (!seen.has(item.name.toLowerCase())) existing.items.push(item);
+            }
+          } else {
+            f.catalog.categories.push(incoming);
+          }
+        }
+        f.catalog.source = "upload";
+      });
+
+      const cats = facts.catalog.categories;
+      const total = cats.reduce((n, c) => n + c.items.length, 0);
+      const card: Card = {
+        kind: "table",
+        title: `Catalog so far — ${cats.length} categories, ${total} items`,
+        columns: ["Category", "Item", "Price"],
+        rows: cats.flatMap((c) =>
+          c.items.map((i) => [c.name, i.name, i.price === undefined ? "—" : String(i.price)]),
+        ),
+      };
+      return JSON.stringify({ card, categories: cats.length, items: total });
+    },
+    {
+      name: "add_items",
+      description:
+        "Append items to the catalog, merging by category name. Use this for each menu photo or list the owner sends, so several photos build up one catalog. Shows the running total back to them.",
       schema: z.object({
         categories: z.array(
           z.object({
@@ -457,6 +517,7 @@ export function buildTools(ctx: ToolContext) {
     showLogoOptions,
     chooseLogo,
     reviewCatalog,
+    addItems,
     setCatalog,
     setBranches,
     assembleApp,
