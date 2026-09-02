@@ -1,3 +1,6 @@
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+
 /**
  * Configuration, validated once at boot.
  *
@@ -20,6 +23,16 @@ function optional(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
+/**
+ * The repository root, derived from this file's own location.
+ *
+ * Resolves the same from src/lib (dev, via type-stripping) and dist/lib
+ * (production), so paths defaulted from it follow the deployment wherever it
+ * was installed. A hardcoded /opt default sent an install under /var/www/html
+ * writing outside its own ReadWritePaths, which systemd answers with EROFS.
+ */
+const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+
 export const env = {
   port: Number(optional("PORT", "8080")),
   publicOrigin: optional("PUBLIC_ORIGIN", "http://localhost:5173"),
@@ -34,8 +47,13 @@ export const env = {
   sessionSecret: required("SESSION_SECRET"),
   databaseUrl: required("DATABASE_URL"),
 
-  /** Where owner-uploaded files are written. Must be writable and persistent. */
-  uploadDir: optional("UPLOAD_DIR", "/opt/mobstep_onboarding/uploads"),
+  /**
+   * Where owner-uploaded files are written. Must be writable and persistent.
+   *
+   * Defaults to <repo>/uploads so it lives inside the deployment — and so
+   * inside the unit's ReadWritePaths — regardless of where that is.
+   */
+  uploadDir: optional("UPLOAD_DIR", join(repoRoot, "uploads")),
 
   whatsapp: {
     businessAccountId: required("WA_BUSINESS_ACCOUNT_ID"),
