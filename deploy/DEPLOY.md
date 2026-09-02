@@ -114,6 +114,31 @@ plain shell. Real environment variables still win, so systemd's
 `pnpm migrate` needs only `DATABASE_URL` — it does not pull in the server's
 config, so a missing WhatsApp token cannot block a schema change.
 
+### When the site returns 502
+
+nginx is up but Node is not. The app's own logs will be empty if systemd never
+started the process, so check the unit first:
+
+```bash
+systemctl status mobstep-onboarding --no-pager
+journalctl -u mobstep-onboarding -n 50 --no-pager
+```
+
+Most likely causes, in order:
+
+1. **The unit's paths do not match the deploy.** `WorkingDirectory`,
+   `EnvironmentFile` and `ReadWritePaths` are set for `/opt/mobstep_onboarding`.
+   With `ProtectSystem=strict`, a `ReadWritePaths` pointing at a directory that
+   does not exist makes systemd fail the unit *before node runs*, so there is
+   nothing in the application log. Fix with the `sed` in the unit's header.
+2. **`dist/` is missing** — the build never ran. `pnpm deploy`.
+3. **A required environment variable is missing**, in which case `env.ts` throws
+   at startup and the reason is the first line of `journalctl`.
+
+An unwritable `UPLOAD_DIR` is deliberately *not* on this list: it disables
+uploads and logs loudly, but the service still starts, because
+`/api/upload/health` has to be reachable to report it.
+
 ### Updating an existing deployment
 
 ```bash

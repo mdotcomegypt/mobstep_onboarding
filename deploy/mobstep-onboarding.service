@@ -3,6 +3,16 @@ Description=Mobstep Onboarding API
 After=network.target postgresql.service
 Wants=postgresql.service
 
+# PATHS: every path below must match where you actually deployed. They are set
+# for /opt/mobstep_onboarding; production currently lives at
+# /var/www/html/mobstep_onboarding. A stale ReadWritePaths is the worst of the
+# three — with ProtectSystem=strict, systemd fails the unit before node runs at
+# all, which shows up as a 502 from nginx and nothing in the app's own logs:
+#
+#   sed -i 's#/opt/mobstep_onboarding#/var/www/html/mobstep_onboarding#g' \
+#     /etc/systemd/system/mobstep-onboarding.service
+#   systemctl daemon-reload && systemctl restart mobstep-onboarding
+
 [Service]
 Type=simple
 User=www-data

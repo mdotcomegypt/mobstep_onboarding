@@ -67,13 +67,26 @@ const prune = setInterval(() => {
 }, 60 * 60 * 1000);
 prune.unref();
 
-// Fail fast, like env.ts does: a service that cannot store uploads should not
-// come up and pretend it can.
+// Degrade, do not die.
+//
+// This used to exit(1), on the reasoning that a service which cannot store
+// uploads should not pretend it can. That was wrong twice over: sessions, OTP
+// and the whole onboarding conversation work fine without uploads, so a
+// misconfigured directory took down features it has nothing to do with; and it
+// made /health and /api/upload/health — the endpoints whose entire job is
+// reporting this — unreachable. A dead process cannot explain why it died.
+//
+// So: complain loudly, keep serving, and let the upload route answer with 503
+// and a fix when someone actually tries to upload.
 try {
   await assertUploadDirWritable();
 } catch (error) {
-  app.log.error((error as Error).message);
-  process.exit(1);
+  app.log.error(
+    { err: error },
+    "File uploads are DISABLED: " +
+      (error as Error).message +
+      " Everything else still works; see GET /api/upload/health.",
+  );
 }
 
 try {
