@@ -16,6 +16,12 @@ server {
     # The handoff token arrives in the URL fragment, which never reaches the
     # server — but make sure nothing else caches an authenticated response.
     location /api/ {
+        # Must be >= MAX_UPLOAD_BYTES in server/src/lib/uploads.ts (12 MB).
+        # nginx defaults to 1 MB, which silently rejects any photo taken on a
+        # phone before the request ever reaches Node — the app's own limit
+        # never gets a say.
+        client_max_body_size 16m;
+
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;

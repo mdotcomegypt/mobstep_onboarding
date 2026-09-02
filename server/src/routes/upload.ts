@@ -15,6 +15,43 @@ import { requireVerified } from "./guard.ts";
 
 export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   /**
+   * GET /api/upload/health — is file upload actually usable right now?
+   *
+   * Unauthenticated and side-effect free. The 500 this replaces told the
+   * operator nothing and lived only in journalctl; this makes the two things
+   * that break uploads (an unapplied migration, an unwritable directory)
+   * answerable with one curl.
+   */
+  app.get("/api/upload/health", async (_request, reply) => {
+    const checks: Record<string, string> = {};
+    let ok = true;
+
+    try {
+      const { assertUploadDirWritable } = await import("../lib/uploads.ts");
+      await assertUploadDirWritable();
+      checks["directory"] = "writable";
+    } catch (error) {
+      checks["directory"] = (error as Error).message;
+      ok = false;
+    }
+
+    try {
+      const { query } = await import("../db/index.ts");
+      await query("SELECT 1 FROM onboarding_uploads LIMIT 1");
+      checks["table"] = "present";
+    } catch (error) {
+      checks["table"] =
+        (error as { code?: string }).code === "42P01"
+          ? "onboarding_uploads is missing — run `pnpm migrate`"
+          : `database error: ${(error as { code?: string }).code ?? "unknown"}`;
+      ok = false;
+    }
+
+    checks["maxBytes"] = String(MAX_UPLOAD_BYTES);
+    return reply.code(ok ? 200 : 503).send({ ok, checks });
+  });
+
+  /**
    * POST /api/upload — multipart, one or more files.
    */
   app.post("/api/upload", async (request, reply) => {
