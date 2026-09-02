@@ -46,6 +46,32 @@ export interface ToolContext {
   appId: number | null;
 }
 
+/**
+ * Business name to Android package slug: "Rosto Fried Chicken" -> "rosto_fried_chicken".
+ *
+ * Must satisfy the same [a-z0-9_] shape Drupal enforces before the value reaches
+ * a shell, so anything else is dropped rather than escaped.
+ */
+function slugify(name: string, uid: number): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 30)
+    .replace(/_+$/, "");
+
+  // An all-Arabic name leaves nothing behind, and most of this market's shops
+  // are named in Arabic. A digit-leading name ("7 Eleven") is also rejected by
+  // Drupal, which requires a leading letter. Neither may block a build.
+  if (base === "") {
+    return `store_${uid}`;
+  }
+  if (!/^[a-z]/.test(base)) {
+    return `app_${base}`.slice(0, 30).replace(/_+$/, "");
+  }
+  return base;
+}
+
 export function buildTools(ctx: ToolContext) {
   const recordBusiness = tool(
     async (input) => {
@@ -151,7 +177,9 @@ export function buildTools(ctx: ToolContext) {
   );
 
   const showThemes = tool(
-    async ({ business }) => {
+    async () => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const business = facts.business.type ?? "";
       const { themes } = await drupal.themes();
       if (themes.length === 0) {
         return "No templates are published, so the app will use the standard Mobstep layout.";
@@ -159,7 +187,7 @@ export function buildTools(ctx: ToolContext) {
 
       // Rank by business match, but always show the rest: an owner is allowed
       // to prefer a layout built for a different trade.
-      const wanted = (business ?? "").toLowerCase();
+      const wanted = business.toLowerCase();
       const ranked = [...themes].sort((a, b) => {
         const score = (t: (typeof themes)[number]) =>
           wanted && t.business?.toLowerCase() === wanted ? 0 : 1;
@@ -181,13 +209,8 @@ export function buildTools(ctx: ToolContext) {
     {
       name: "show_themes",
       description:
-        "Show the owner the ready-made app layouts to choose from, ranked by how well they match their trade. Call this once you know what the business does and before assembling. They may also decline and keep the standard layout.",
-      schema: z.object({
-        business: z
-          .string()
-          .optional()
-          .describe("The business category, to rank matching templates first"),
-      }),
+        "Show the owner the ready-made app layouts, ranked against the business type already on file. Takes no arguments — do not ask the owner what kind of business they run in order to call it; record_business is where that is decided.",
+      schema: z.object({}),
     },
   );
 
@@ -372,9 +395,20 @@ export function buildTools(ctx: ToolContext) {
 
   const assembleApp = tool(
     async ({ packageName, plan }) => {
-      const facts = await mutateFacts(ctx.sessionId, (f) => {
+      const current = await mutateFacts(ctx.sessionId, (f) => {
         f.phase = "assembly";
-        f.packageName = packageName;
+      });
+
+      // Derived, not asked. A store owner has no basis for choosing an Android
+      // package slug, and making them invent one mid-conversation is a question
+      // that only exists because the field does.
+      if (!current.business.name) {
+        throw new Error("The business name is not set yet.");
+      }
+      const slug = packageName ?? slugify(current.business.name, ctx.uid);
+
+      const facts = await mutateFacts(ctx.sessionId, (f) => {
+        f.packageName = slug;
       });
 
       // Idempotent: a retry after a partial failure must not create a second
@@ -389,8 +423,8 @@ export function buildTools(ctx: ToolContext) {
       const created = await drupal.createApp({
         uid: ctx.uid,
         name: business.name,
-        package_name: packageName,
-        plan,
+        package_name: slug,
+        plan: plan ?? "starter",
         business_type: business.type ?? "general",
         language: business.languages?.[0] ?? "en",
         currency: business.currency ?? "USD",
@@ -451,13 +485,17 @@ export function buildTools(ctx: ToolContext) {
     {
       name: "assemble_app",
       description:
-        "Create the app in Mobstep from everything collected so far: branding, catalog and locations. Only call once, and only after the owner has confirmed they are ready.",
+        "Create the app in Mobstep from everything collected so far: branding, catalog and locations. Both arguments are optional and are worked out for you — never ask the owner for a package name or a plan. Call once, after they confirm they are ready.",
       schema: z.object({
         packageName: z
           .string()
           .regex(/^[a-z][a-z0-9_]{2,29}$/, "lowercase letters, digits and underscores only")
-          .describe("Short slug for the app, e.g. 'nile_grill'"),
-        plan: z.enum(["starter", "basic", "premium"]).describe("Defaults to starter"),
+          .optional()
+          .describe("Only if the owner asked for a specific one; otherwise it is derived from the business name"),
+        plan: z
+          .enum(["starter", "basic", "premium"])
+          .optional()
+          .describe("Only if the owner chose one; defaults to starter"),
       }),
     },
   );
