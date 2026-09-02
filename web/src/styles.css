@@ -420,3 +420,27 @@ tr:last-child td { border-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Work the agent did, kept in the transcript rather than flashing past. */
+.steps {
+  list-style: none; margin: 0; padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); font-size: 12.5px; color: var(--ink-dim);
+}
+.steps li { display: flex; align-items: center; gap: 8px; }
+.steps li.is-done { color: var(--ink); }
+.step-mark {
+  flex: 0 0 14px; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--border); position: relative;
+}
+.is-running .step-mark {
+  border-color: var(--blue); border-top-color: transparent;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.is-done .step-mark { background: var(--ok); border-color: var(--ok); }
+.is-done .step-mark::after {
+  content: ""; position: absolute; inset: 0;
+  background: no-repeat center/8px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+}

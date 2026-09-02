@@ -6,6 +6,7 @@ import { env } from "./lib/env.ts";
 import { pruneUsedTokens } from "./lib/session.ts";
 import { MAX_UPLOAD_BYTES, assertUploadDirWritable } from "./lib/uploads.ts";
 import { chatRoutes } from "./routes/chat.ts";
+import { debugRoutes } from "./routes/debug.ts";
 import { otpRoutes } from "./routes/otp.ts";
 import { sessionRoutes } from "./routes/session.ts";
 import { uploadRoutes } from "./routes/upload.ts";
@@ -67,6 +68,7 @@ await app.register(sessionRoutes);
 await app.register(otpRoutes);
 await app.register(chatRoutes);
 await app.register(uploadRoutes);
+await app.register(debugRoutes);
 
 // Housekeeping for the replay-protection table.
 const prune = setInterval(() => {

@@ -5,6 +5,7 @@ import { CARD_TOOLS } from "../graph/tools.ts";
 import type { Card, OnboardingFacts } from "../graph/state.ts";
 import { query } from "../db/index.ts";
 import { listUploads, loadUpload, publicUrl } from "../lib/uploads.ts";
+import { brief, newTurnId, trace } from "../lib/trace.ts";
 import { requireVerified } from "./guard.ts";
 
 /**
@@ -63,11 +64,18 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     let assistantText = "";
     const cards: Card[] = [];
+    const turnId = newTurnId();
+    const startedAt = Date.now();
+    const ctx = { sessionId: session.id, turnId };
 
     try {
       // Only this session's uploads are addressable, so a guessed id from
       // another owner's conversation resolves to nothing.
       const attachments = await listUploads(session.id, attachmentIds);
+      trace("turn.start", {
+        text: brief(text, 120),
+        attachments: attachments.map((a) => `${a.mime} ${a.bytes}b`),
+      }, ctx);
 
       if (!isOpening) {
         const cards: Card[] = attachments.map((a) => ({
@@ -120,6 +128,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
             : preamble,
       });
 
+      trace("model.input", {
+        parts: parts.map((p) => {
+          const type = String(p["type"]);
+          return type === "image_url" ? "image_url(inline)" : type;
+        }),
+      }, ctx);
+
       const input = {
         messages: [new HumanMessage({ content: parts })],
       };
@@ -149,23 +164,50 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         // of parts. Those were dropped silently, which is how a turn ended at
         // "Great" with the actual question missing. If a run streamed nothing,
         // take the text off its final message instead.
-        if (event.event === "on_chat_model_end" && !streamedByRun.get(event.run_id)) {
-          const piece = textOf(event.data?.output);
-          if (piece) {
-            assistantText += piece;
-            send("token", { text: piece });
+        if (event.event === "on_chat_model_end") {
+          const streamed = streamedByRun.get(event.run_id) ?? 0;
+          const output = event.data?.output as
+            | { tool_calls?: Array<{ name: string }> }
+            | undefined;
+
+          trace("model.end", {
+            streamedChars: streamed,
+            toolCalls: (output?.tool_calls ?? []).map((c) => c.name),
+            finalText: brief(textOf(output), 200),
+          }, ctx);
+
+          if (!streamed) {
+            const piece = textOf(output);
+            if (piece) {
+              assistantText += piece;
+              send("token", { text: piece });
+            }
           }
         }
 
-        if (event.event === "on_tool_end" && CARD_TOOLS.has(event.name)) {
-          const card = extractCard(event.data?.output);
-          if (card) {
-            cards.push(card);
-            send("card", card);
+        if (event.event === "on_tool_end") {
+          trace("tool.end", {
+            name: event.name,
+            result: brief(
+              typeof event.data?.output === "string"
+                ? event.data.output
+                : (event.data?.output as { content?: unknown } | undefined)?.content,
+              200,
+            ),
+          }, ctx);
+
+          if (CARD_TOOLS.has(event.name)) {
+            const card = extractCard(event.data?.output);
+            if (card) {
+              cards.push(card);
+              send("card", card);
+            }
           }
+          send("tool_done", { name: event.name });
         }
 
         if (event.event === "on_tool_start") {
+          trace("tool.start", { name: event.name, args: brief(event.data?.input, 200) }, ctx);
           send("tool", { name: event.name });
         }
       }
@@ -178,6 +220,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         assistantText = fallback;
         send("token", { text: fallback });
         request.log.warn({ sessionId: session.id }, "turn produced no assistant output");
+        trace("turn.empty", {}, ctx);
       }
 
       await query(
@@ -186,6 +229,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       );
 
       const facts = await loadFacts(session.id);
+      trace("turn.done", {
+        ms: Date.now() - startedAt,
+        chars: assistantText.length,
+        cards: cards.length,
+        phase: facts.phase,
+      }, ctx);
       send("done", {
         phase: facts.phase,
         appId: facts.appId ?? null,
@@ -193,6 +242,10 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       });
     } catch (error) {
       request.log.error({ err: error }, "chat turn failed");
+      trace("turn.error", {
+        ms: Date.now() - startedAt,
+        message: brief(error instanceof Error ? error.message : String(error), 600),
+      }, ctx);
 
       // The generic message alone made every failure look identical and lived
       // only in journalctl, so the same class of bug had to be guessed at

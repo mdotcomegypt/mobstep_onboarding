@@ -58,6 +58,7 @@ export interface ChatHandlers {
   onToken: (text: string) => void;
   onCard: (card: Card) => void;
   onTool: (name: string) => void;
+  onToolDone: (name: string) => void;
   onDone: (info: { phase: string; appId: number | null; facts: PreviewFacts }) => void;
   onError: (message: string, detail?: string) => void;
 }
@@ -141,6 +142,9 @@ export async function streamTurn(
           break;
         case "tool":
           handlers.onTool((parsed as { name: string }).name);
+          break;
+        case "tool_done":
+          handlers.onToolDone((parsed as { name: string }).name);
           break;
         case "done":
           handlers.onDone(parsed as { phase: string; appId: number | null; facts: PreviewFacts });

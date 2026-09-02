@@ -5,12 +5,24 @@ import { AppPreview } from "./AppPreview.tsx";
 import { CardView } from "./Cards.tsx";
 import { Composer } from "./Composer.tsx";
 
+interface Step {
+  name: string;
+  done: boolean;
+}
+
 interface Turn {
   role: "user" | "assistant";
   text: string;
   cards: Card[];
+  /** Work the agent did in this turn, kept visible after it finishes. */
+  steps?: Step[];
 }
 
+/**
+ * A transient "Thinking…" label tells the owner nothing and disappears, so a
+ * slow turn looks like a hang. These stay in the transcript as a short record of
+ * what was actually done.
+ */
 const TOOL_LABELS: Record<string, string> = {
   inspect_website: "Reading their website",
   record_business: "Noting that down",
@@ -69,7 +81,7 @@ export function Chat({ session }: { session: SessionView }) {
     setTurns((prev) => [
       ...prev,
       ...(isOpening ? [] : ([{ role: "user", text: message, cards: [] }] as Turn[])),
-      { role: "assistant", text: "", cards: [] },
+      { role: "assistant", text: "", cards: [], steps: [] },
     ]);
 
     const patchLast = (fn: (turn: Turn) => Turn): void =>
@@ -87,7 +99,20 @@ export function Chat({ session }: { session: SessionView }) {
           patchLast((t) => ({ ...t, text: t.text + text }));
         },
         onCard: (card) => patchLast((t) => ({ ...t, cards: [...t.cards, card] })),
-        onTool: (name) => setActivity(TOOL_LABELS[name] ?? "Working"),
+        onTool: (name) => {
+          setActivity(TOOL_LABELS[name] ?? "Working");
+          patchLast((t) => ({
+            ...t,
+            steps: [...(t.steps ?? []), { name, done: false }],
+          }));
+        },
+        onToolDone: (name) =>
+          patchLast((t) => ({
+            ...t,
+            steps: (t.steps ?? []).map((s) =>
+              s.name === name && !s.done ? { ...s, done: true } : s,
+            ),
+          })),
         onDone: (info) => {
           setActivity(null);
           setPhase(info.phase);
@@ -182,6 +207,16 @@ export function Chat({ session }: { session: SessionView }) {
           <article key={i} className={`turn turn-${turn.role}`}>
             {turn.role === "assistant" && turn.text && <span className="avatar">M</span>}
             <div className="turn-body">
+              {(turn.steps?.length ?? 0) > 0 && (
+                <ol className="steps">
+                  {turn.steps!.map((step, k) => (
+                    <li key={k} className={step.done ? "is-done" : "is-running"}>
+                      <span className="step-mark" aria-hidden="true" />
+                      {TOOL_LABELS[step.name] ?? step.name}
+                    </li>
+                  ))}
+                </ol>
+              )}
               {turn.text && <div className="bubble">{turn.text}</div>}
               {turn.cards.map((card, j) => (
                 <CardView

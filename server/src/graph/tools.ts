@@ -79,7 +79,7 @@ export function buildTools(ctx: ToolContext) {
         Object.assign(facts.business, input);
         if (facts.phase === "discovery") facts.phase = "branding";
       });
-      return `Saved: ${JSON.stringify(input)}`;
+      return `Saved: ${JSON.stringify(input)}. Next: if you do not have their website or social page yet, ask for it — it saves them most of the typing.`;
     },
     {
       name: "record_business",
@@ -134,7 +134,11 @@ export function buildTools(ctx: ToolContext) {
         facts.phase = "branding";
       });
       const card: Card = { kind: "palette", options: options as Palette[] };
-      return JSON.stringify({ card, rationale });
+      return JSON.stringify({
+        card,
+        rationale,
+        next: "The options are on screen. Say in one line why you picked them and ask which they prefer.",
+      });
     },
     {
       name: "propose_palette",
@@ -153,7 +157,7 @@ export function buildTools(ctx: ToolContext) {
         facts.brand.palette = palette as Palette;
         facts.phase = "catalog";
       });
-      return `Palette locked in: brand ${palette.brand}.`;
+      return `Palette locked in: brand ${palette.brand}. Next: ask for their menu — a photo of it is the fastest way, and you can read photos.`;
     },
     {
       name: "choose_palette",
@@ -204,7 +208,10 @@ export function buildTools(ctx: ToolContext) {
           screenshots: t.screenshots.slice(0, 3),
         })),
       };
-      return JSON.stringify({ card });
+      return JSON.stringify({
+        card,
+        next: "The layouts are on screen. Ask which one they like, and say they can keep the standard layout instead.",
+      });
     },
     {
       name: "show_themes",
@@ -220,8 +227,8 @@ export function buildTools(ctx: ToolContext) {
         facts.themeId = themeId ?? null;
       });
       return themeId
-        ? `Layout #${themeId} recorded. It will be applied at assembly.`
-        : "Standard Mobstep layout recorded.";
+        ? `Layout #${themeId} recorded. Next: move on to branding — propose_palette with two or three colour schemes drawn from their existing brand.`
+        : "Standard Mobstep layout recorded. Next: move on to branding — propose_palette with two or three colour schemes.";
     },
     {
       name: "choose_theme",
@@ -236,7 +243,7 @@ export function buildTools(ctx: ToolContext) {
       await mutateFacts(ctx.sessionId, (facts) => {
         facts.brand.logoUrl = url;
       });
-      return `Logo recorded. It will be applied to the app at assembly.`;
+      return "Logo recorded. Next: if the colour scheme is not settled yet, propose_palette; otherwise move on to the menu.";
     },
     {
       name: "choose_logo",
@@ -258,7 +265,7 @@ export function buildTools(ctx: ToolContext) {
       });
       const cats = facts.catalog.categories;
       const count = cats.reduce((n, c) => n + c.items.length, 0);
-      return `Catalog confirmed: ${cats.length} categories, ${count} items.`;
+      return `Catalog confirmed: ${cats.length} categories, ${count} items. Next: ask for their branch address and a phone number.`;
     },
     {
       name: "set_catalog",
@@ -346,7 +353,12 @@ export function buildTools(ctx: ToolContext) {
           c.items.map((i) => [c.name, i.name, i.price === undefined ? "—" : String(i.price)]),
         ),
       };
-      return JSON.stringify({ card, categories: cats.length, items: total });
+      return JSON.stringify({
+        card,
+        categories: cats.length,
+        items: total,
+        next: "Tell them what you read and ask whether it looks right, or whether there is another page of the menu to send.",
+      });
     },
     {
       name: "add_items",
@@ -375,7 +387,7 @@ export function buildTools(ctx: ToolContext) {
         facts.locations.branches = branches;
         facts.phase = "assembly";
       });
-      return `Saved ${branches.length} location(s).`;
+      return `Saved ${branches.length} location(s). Next: everything needed is collected — summarise it and ask whether they are ready for you to build the app.`;
     },
     {
       name: "set_branches",

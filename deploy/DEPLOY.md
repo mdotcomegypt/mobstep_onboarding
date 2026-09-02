@@ -118,6 +118,33 @@ plain shell. Real environment variables still win, so systemd's
 `pnpm migrate` needs only `DATABASE_URL` — it does not pull in the server's
 config, so a missing WhatsApp token cannot block a schema change.
 
+### Seeing what the agent actually did
+
+Set `DEBUG_KEY` in `.env` (any long random string) and the service exposes a
+read-only trace of recent turns. With the variable unset the route 404s as if it
+did not exist.
+
+```bash
+curl -s "https://onboarding.mobstep.com/api/debug/log?key=$DEBUG_KEY&format=text" | tail -40
+```
+
+Each turn shows its inputs, every tool call and result, what the model streamed
+or returned, and how long it took:
+
+```
+2026-09-02T…  s7/3f2a91c4   turn.start   text="the menu"  attachments=["image/jpeg 517233b"]
+2026-09-02T…  s7/3f2a91c4   model.input  parts=["text","image_url(inline)"]
+2026-09-02T…  s7/3f2a91c4   model.end    streamedChars=0  toolCalls=["add_items"]  finalText=""
+2026-09-02T…  s7/3f2a91c4   tool.start   name=add_items  args={"categories":[…
+2026-09-02T…  s7/3f2a91c4   tool.end     name=add_items  result={"card":{…
+2026-09-02T…  s7/3f2a91c4   turn.done    ms=14820  chars=142  cards=1  phase=catalog
+```
+
+`turn.empty` means the model returned nothing at all; `turn.error` carries the
+provider's message. Add `&session=<id>` to follow one conversation. It is a ring
+buffer of the last 400 events, in memory, cleared on restart — a debugging aid,
+not an audit log. Rotate the key if you paste a trace anywhere.
+
 ### When the site returns 502
 
 nginx is up but Node is not. The app's own logs will be empty if systemd never
