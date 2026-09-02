@@ -1,0 +1,13 @@
+{
+  "name": "mobstep-onboarding",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter ./server --filter ./web dev",
+    "build": "pnpm --filter ./server build && pnpm --filter ./web build",
+    "migrate": "pnpm --filter ./server migrate",
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "preflight": "pnpm --filter ./server preflight"
+  }
+}

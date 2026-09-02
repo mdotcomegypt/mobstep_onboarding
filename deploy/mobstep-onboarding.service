@@ -1,0 +1,23 @@
+[Unit]
+Description=Mobstep Onboarding API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/mobstep_onboarding/server
+EnvironmentFile=/opt/mobstep_onboarding/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=3
+
+# The process only ever needs to read its own tree and talk to Postgres.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mobstep_onboarding
+
+[Install]
+WantedBy=multi-user.target

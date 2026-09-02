@@ -1,0 +1,40 @@
+# onboarding.mobstep.com
+#
+# The API and the SPA are served from one origin so the session cookie is
+# first-party: no CORS, no SameSite=None, no third-party-cookie problems.
+
+server {
+    listen 443 ssl http2;
+    server_name onboarding.mobstep.com;
+
+    ssl_certificate     /etc/letsencrypt/live/onboarding.mobstep.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/onboarding.mobstep.com/privkey.pem;
+
+    root /opt/mobstep_onboarding/web/dist;
+    index index.html;
+
+    # The handoff token arrives in the URL fragment, which never reaches the
+    # server — but make sure nothing else caches an authenticated response.
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Agent responses stream over SSE; buffering would hold them back.
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+server {
+    listen 80;
+    server_name onboarding.mobstep.com;
+    return 301 https://$host$request_uri;
+}

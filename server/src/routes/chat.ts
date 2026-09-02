@@ -1,0 +1,153 @@
+import type { FastifyInstance } from "fastify";
+import { HumanMessage, buildGraph, threadId } from "../graph/agent.ts";
+import { loadFacts } from "../graph/facts.ts";
+import { CARD_TOOLS } from "../graph/tools.ts";
+import type { Card } from "../graph/state.ts";
+import { query } from "../db/index.ts";
+import { requireVerified } from "./guard.ts";
+
+/**
+ * The chat endpoint.
+ *
+ * Streams over SSE rather than returning a whole reply: the agent regularly
+ * spends ten or twenty seconds fetching a website or assembling an app, and a
+ * silent spinner for that long reads as a hang.
+ *
+ * Three event types reach the browser:
+ *   token  — a fragment of assistant prose, appended as it arrives
+ *   card   — a structured preview (palette, logo, table, progress, link)
+ *   done   — end of turn, carrying the updated phase
+ *   error  — something failed; the message is safe to show
+ */
+export async function chatRoutes(app: FastifyInstance): Promise<void> {
+  /** Transcript for reconnects and reloads. */
+  app.get("/api/chat/history", async (request, reply) => {
+    const session = await requireVerified(request, reply);
+    if (!session) return;
+
+    const rows = await query<{ role: string; content: string; cards: Card[] }>(
+      `SELECT role, content, cards FROM onboarding_messages
+        WHERE session_id = $1 ORDER BY id`,
+      [session.id],
+    );
+    const facts = await loadFacts(session.id);
+    return reply.send({ messages: rows, phase: facts.phase });
+  });
+
+  app.post<{ Body: { message?: string } }>("/api/chat", async (request, reply) => {
+    const session = await requireVerified(request, reply);
+    if (!session) return;
+
+    const text = (request.body?.message ?? "").trim();
+    // An empty message is how the client asks for the opening greeting.
+    const isOpening = text === "";
+
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const send = (event: string, data: unknown): void => {
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Heartbeat: proxies and browsers drop an idle stream, and a website fetch
+    // plus a model call can easily exceed the default timeouts.
+    const heartbeat = setInterval(() => reply.raw.write(": ping\n\n"), 15_000);
+
+    let assistantText = "";
+    const cards: Card[] = [];
+
+    try {
+      if (!isOpening) {
+        await query(
+          "INSERT INTO onboarding_messages (session_id, role, content) VALUES ($1, 'user', $2)",
+          [session.id, text],
+        );
+      }
+
+      const graph = await buildGraph({
+        sessionId: session.id,
+        uid: session.drupal_uid,
+        appId: session.app_id,
+      });
+
+      const input = {
+        messages: [
+          new HumanMessage(
+            isOpening
+              ? "(The owner has just arrived. Greet them and start.)"
+              : text,
+          ),
+        ],
+      };
+
+      const stream = graph.streamEvents(input, {
+        version: "v2",
+        configurable: { thread_id: threadId(session.id) },
+        recursionLimit: 40,
+      });
+
+      for await (const event of stream) {
+        if (event.event === "on_chat_model_stream") {
+          const chunk = event.data?.chunk as { text?: string } | undefined;
+          const piece = typeof chunk?.text === "string" ? chunk.text : "";
+          if (piece) {
+            assistantText += piece;
+            send("token", { text: piece });
+          }
+        }
+
+        if (event.event === "on_tool_end" && CARD_TOOLS.has(event.name)) {
+          const card = extractCard(event.data?.output);
+          if (card) {
+            cards.push(card);
+            send("card", card);
+          }
+        }
+
+        if (event.event === "on_tool_start") {
+          send("tool", { name: event.name });
+        }
+      }
+
+      await query(
+        "INSERT INTO onboarding_messages (session_id, role, content, cards) VALUES ($1, 'assistant', $2, $3)",
+        [session.id, assistantText, JSON.stringify(cards)],
+      );
+
+      const facts = await loadFacts(session.id);
+      send("done", { phase: facts.phase, appId: facts.appId ?? null });
+    } catch (error) {
+      request.log.error({ err: error }, "chat turn failed");
+      send("error", {
+        message:
+          "Something went wrong on our side. Try sending that again — I kept everything so far.",
+      });
+    } finally {
+      clearInterval(heartbeat);
+      reply.raw.end();
+    }
+  });
+}
+
+/**
+ * Tool results arrive as a ToolMessage whose content is the JSON string the
+ * tool returned; pull the card out if there is one.
+ */
+function extractCard(output: unknown): Card | null {
+  const content =
+    typeof output === "string"
+      ? output
+      : (output as { content?: unknown } | undefined)?.content;
+  if (typeof content !== "string") return null;
+
+  try {
+    const parsed = JSON.parse(content) as { card?: Card };
+    return parsed.card ?? null;
+  } catch {
+    return null;
+  }
+}

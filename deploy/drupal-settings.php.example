@@ -1,0 +1,34 @@
+<?php
+
+/**
+ * Add to sites/default/settings.php on the Drupal side.
+ *
+ * None of these belong in version control. settings.php is currently tracked in
+ * git and already contains live secrets; add these to a gitignored include
+ * rather than following that precedent.
+ */
+
+// Shared with the onboarding service's ONBOARDING_SECRET. Signs the handoff JWT.
+//   openssl rand -hex 32
+$settings['onboarding_secret'] = '';
+
+// Where owners are sent. Leave empty to keep the legacy /create/* funnel.
+$settings['onboarding_origin'] = 'https://onboarding.mobstep.com';
+
+// Handoff token lifetime in seconds. The token is single-use regardless.
+$settings['onboarding_token_ttl'] = 300;
+
+// Rollback switch: TRUE forces every owner back to /create/* with no deploy.
+$settings['onboarding_legacy_fallback'] = FALSE;
+
+// Shared with the onboarding service's MOBLD_SECRET. Authorizes the machine API
+// at /api/v3.0/onboarding/* and /api/v3.0/provision/*.
+$settings['apps.mobld_secret'] = '';
+
+// "Continue with Google" on /user/login and /user/register. Register the
+// redirect URI https://mobstep.com/user/login/google/callback in the Google
+// console. Omit these and the button is not rendered at all.
+$settings['google_oauth'] = [
+  'client_id' => '',
+  'client_secret' => '',
+];
