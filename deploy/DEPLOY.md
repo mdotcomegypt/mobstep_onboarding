@@ -78,6 +78,10 @@ sudo -u postgres createdb  onboarding_db --owner=onboarding
 
 Build on a machine with the toolchain, ship the result:
 
+> The command is `pnpm release`, not `pnpm deploy`: `deploy` is a pnpm builtin
+> for workspace deployment and shadows any script of that name, failing with
+> `ERR_PNPM_NOTHING_TO_DEPLOY` without ever running the script.
+
 ```bash
 bash deploy/build.sh                       # install + typecheck + build
 rsync -a --exclude node_modules --exclude .git \
@@ -131,7 +135,7 @@ Most likely causes, in order:
    With `ProtectSystem=strict`, a `ReadWritePaths` pointing at a directory that
    does not exist makes systemd fail the unit *before node runs*, so there is
    nothing in the application log. Fix with the `sed` in the unit's header.
-2. **`dist/` is missing** — the build never ran. `pnpm deploy`.
+2. **`dist/` is missing** — the build never ran. `pnpm release`.
 3. **A required environment variable is missing**, in which case `env.ts` throws
    at startup and the reason is the first line of `journalctl`.
 
@@ -144,7 +148,7 @@ uploads and logs loudly, but the service still starts, because
 ```bash
 cd /var/www/html/mobstep_onboarding
 git pull
-pnpm deploy                       # install + build + migrate
+pnpm release                      # install + build + migrate
 sudo systemctl restart mobstep-onboarding
 curl -s localhost:8080/api/health # commit here must match `git rev-parse --short HEAD`
 ```
@@ -152,7 +156,7 @@ curl -s localhost:8080/api/health # commit here must match `git rev-parse --shor
 **`dist/` is gitignored and systemd runs `dist/index.js`, so a `git pull`
 changes nothing until you rebuild.** Skipping the build leaves the service on
 old code while the checkout looks current — new routes 404 and old bugs persist,
-which reads as "the fix didn't work". `pnpm deploy` exists so the build cannot
+which reads as "the fix didn't work". `pnpm release` exists so the build cannot
 be forgotten, and `/api/health` reports the built commit so the mismatch is visible (use
 `/api/health`, not `/health` — nginx serves anything outside `/api/` from the
 SPA, so a bare `/health` returns the React app):
