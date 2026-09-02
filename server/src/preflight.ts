@@ -7,9 +7,41 @@
  */
 import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { env } from "./lib/env.ts";
-import { pool } from "./db/index.ts";
-import { resolveTemplateLanguage } from "./lib/whatsapp.ts";
+
+/**
+ * Configuration is checked before anything is imported.
+ *
+ * env.ts throws at import time on the first missing variable, which for the
+ * *server* is correct. For the tool whose entire job is diagnosing a
+ * configuration, crashing on variable one and hiding the other six is the
+ * opposite of useful — so report them all, then load the modules that need them.
+ */
+const REQUIRED = [
+  "ONBOARDING_SECRET",
+  "MOBLD_SECRET",
+  "SESSION_SECRET",
+  "DATABASE_URL",
+  "WA_BUSINESS_ACCOUNT_ID",
+  "WA_PHONE_NUMBER_ID",
+  "WA_ACCESS_TOKEN",
+];
+
+const missing = REQUIRED.filter((name) => !process.env[name]);
+if (missing.length > 0) {
+  console.error("\n✗ Missing environment variables:\n");
+  for (const name of missing) {
+    console.error(`    ${name}`);
+  }
+  console.error(
+    "\n  Set these in .env at the repository root (see .env.example).\n" +
+      "  preflight loads that file automatically.\n",
+  );
+  process.exit(1);
+}
+
+const { env } = await import("./lib/env.ts");
+const { pool } = await import("./db/index.ts");
+const { resolveTemplateLanguage } = await import("./lib/whatsapp.ts");
 
 type Result = { name: string; ok: boolean; detail: string };
 

@@ -8,7 +8,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/opt/mobstep_onboarding/server
 EnvironmentFile=/opt/mobstep_onboarding/.env
-ExecStart=/usr/bin/node dist/index.js
+ExecStart=/usr/bin/node --env-file-if-exists=../.env dist/index.js
 Restart=always
 RestartSec=3
 

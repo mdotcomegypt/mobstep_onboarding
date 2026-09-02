@@ -84,6 +84,12 @@ rsync -a --exclude node_modules --exclude .git \
       ./ root@<server>:/opt/mobstep_onboarding/
 ```
 
+> `deploy/mobstep-onboarding.service` hardcodes `/opt/mobstep_onboarding`.
+> If you deploy somewhere else — `/var/www/html/mobstep_onboarding`, say — edit
+> `WorkingDirectory`, `EnvironmentFile` and `ReadWritePaths` in the unit to
+> match, or `ProtectSystem=strict` will make the whole tree read-only and the
+> service will refuse to start.
+
 On the server:
 
 ```bash
@@ -97,8 +103,16 @@ mkdir -p uploads && chown www-data uploads && chmod 750 uploads
 
 pnpm install --prod --filter ./server
 pnpm migrate                               # re-run after EVERY deploy
-pnpm preflight                             # must be 8/8 before going further
+pnpm preflight                             # must be 7/7 before going further
 ```
+
+Every script loads `.env` from the repository root itself
+(`--env-file-if-exists`), so `pnpm migrate` and `pnpm preflight` work from a
+plain shell. Real environment variables still win, so systemd's
+`EnvironmentFile` keeps precedence in the running service.
+
+`pnpm migrate` needs only `DATABASE_URL` — it does not pull in the server's
+config, so a missing WhatsApp token cannot block a schema change.
 
 **`pnpm migrate` is not a one-time step.** New migrations ship with the code, and
 a deploy that skips it leaves tables missing — which surfaces as a 500 from the
