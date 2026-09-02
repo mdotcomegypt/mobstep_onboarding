@@ -8,6 +8,7 @@
     "build": "pnpm --filter ./server build && pnpm --filter ./web build",
     "migrate": "pnpm --filter ./server migrate",
     "typecheck": "pnpm -r exec tsc --noEmit",
-    "preflight": "pnpm --filter ./server preflight"
+    "preflight": "pnpm --filter ./server preflight",
+    "deploy": "pnpm install --frozen-lockfile && pnpm build && pnpm migrate"
   }
 }

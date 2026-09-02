@@ -31,7 +31,30 @@ await app.register(cors, {
   credentials: true,
 });
 
-app.get("/health", async () => ({ ok: true }));
+/**
+ * Health, plus which build is actually running.
+ *
+ * The commit matters: dist/ is gitignored and systemd runs the compiled output,
+ * so a pull without a rebuild leaves this reporting the old commit while the
+ * checkout shows the new one. That mismatch is the whole diagnosis.
+ */
+const buildInfo = await (async () => {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(await readFile(join(here, "build-info.json"), "utf8")) as {
+      commit: string;
+      builtAt: string;
+    };
+  } catch {
+    // Running from source via --experimental-strip-types, or never built.
+    return { commit: "unknown", builtAt: "unknown" };
+  }
+})();
+
+app.get("/health", async () => ({ ok: true, ...buildInfo }));
 
 await app.register(sessionRoutes);
 await app.register(otpRoutes);

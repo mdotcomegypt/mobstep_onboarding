@@ -114,6 +114,30 @@ plain shell. Real environment variables still win, so systemd's
 `pnpm migrate` needs only `DATABASE_URL` — it does not pull in the server's
 config, so a missing WhatsApp token cannot block a schema change.
 
+### Updating an existing deployment
+
+```bash
+cd /var/www/html/mobstep_onboarding
+git pull
+pnpm deploy                       # install + build + migrate
+sudo systemctl restart mobstep-onboarding
+curl -s localhost:8080/health     # commit here must match `git rev-parse --short HEAD`
+```
+
+**`dist/` is gitignored and systemd runs `dist/index.js`, so a `git pull`
+changes nothing until you rebuild.** Skipping the build leaves the service on
+old code while the checkout looks current — new routes 404 and old bugs persist,
+which reads as "the fix didn't work". `pnpm deploy` exists so the build cannot
+be forgotten, and `/health` reports the built commit so the mismatch is visible:
+
+```json
+{"ok":true,"commit":"33cf36f","builtAt":"2026-09-02T05:17:37.558Z"}
+```
+
+Note the asymmetry that makes this confusing: `pnpm migrate` and `pnpm preflight`
+run from `src/` via type-stripping, so they pick up a pull immediately. Only the
+service runs compiled output.
+
 **`pnpm migrate` is not a one-time step.** New migrations ship with the code, and
 a deploy that skips it leaves tables missing — which surfaces as a 500 from the
 feature that needed them, nowhere near the cause. `pnpm preflight` checks every
