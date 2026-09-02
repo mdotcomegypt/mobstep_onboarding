@@ -130,10 +130,27 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         recursionLimit: 40,
       });
 
+      // Text streamed per model run, so the end-of-run fallback can tell
+      // "this run streamed nothing" from "this run already streamed".
+      const streamedByRun = new Map<string, number>();
+
       for await (const event of stream) {
         if (event.event === "on_chat_model_stream") {
-          const chunk = event.data?.chunk as { text?: string } | undefined;
-          const piece = typeof chunk?.text === "string" ? chunk.text : "";
+          const piece = textOf(event.data?.chunk);
+          if (piece) {
+            streamedByRun.set(event.run_id, (streamedByRun.get(event.run_id) ?? 0) + piece.length);
+            assistantText += piece;
+            send("token", { text: piece });
+          }
+        }
+
+        // Some responses never arrive as usable stream chunks — most often the
+        // reply *after* a tool call, where Gemini returns content as an array
+        // of parts. Those were dropped silently, which is how a turn ended at
+        // "Great" with the actual question missing. If a run streamed nothing,
+        // take the text off its final message instead.
+        if (event.event === "on_chat_model_end" && !streamedByRun.get(event.run_id)) {
+          const piece = textOf(event.data?.output);
           if (piece) {
             assistantText += piece;
             send("token", { text: piece });
@@ -151,6 +168,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         if (event.event === "on_tool_start") {
           send("tool", { name: event.name });
         }
+      }
+
+      // A turn that produced no words at all is a bug, not a valid reply.
+      // Rather than leave the owner looking at an empty bubble with no idea
+      // whether anything happened, say so and keep the conversation moving.
+      if (!assistantText.trim() && cards.length === 0) {
+        const fallback = "Sorry — I lost my train of thought there. Could you say that again?";
+        assistantText = fallback;
+        send("token", { text: fallback });
+        request.log.warn({ sessionId: session.id }, "turn produced no assistant output");
       }
 
       await query(
@@ -184,6 +211,34 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     }
   },
   );
+}
+
+/**
+ * Pulls display text out of a chunk or a finished message.
+ *
+ * `.text` is only reliable when `content` is a plain string. Gemini returns an
+ * array of parts whenever a reply carries anything besides prose — including
+ * every reply that accompanies a function call — and `.text` is empty for
+ * those, so the parts have to be walked.
+ */
+function textOf(value: unknown): string {
+  if (!value) return "";
+
+  const message = value as { text?: unknown; content?: unknown };
+
+  if (typeof message.content === "string") return message.content;
+
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        const typed = part as { type?: string; text?: unknown };
+        return typed.type === "text" && typeof typed.text === "string" ? typed.text : "";
+      })
+      .join("");
+  }
+
+  return typeof message.text === "string" ? message.text : "";
 }
 
 /**
