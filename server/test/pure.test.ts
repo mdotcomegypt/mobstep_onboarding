@@ -256,3 +256,115 @@ describe("eachWithProgress — batches that must not fail whole", () => {
     assert.equal(results[0]?.value, 1);
   });
 });
+
+describe("tool schemas — what Gemini will actually accept", () => {
+  /**
+   * The failure this guards against took down every turn in production, and it
+   * was caused by one word in one tool.
+   *
+   * Gemini's `FunctionDeclaration.parameters` is a small OpenAPI 3.0 subset. An
+   * unknown keyword anywhere in it is not ignored: the request is rejected with
+   * a 400 naming the offending path, and the rejection covers ALL tools in the
+   * payload, so one bad schema silences the whole agent.
+   *
+   * `z.number().positive()` is the trap. Zod emits it as `exclusiveMinimum`,
+   * which Gemini has no field for. `.min()` emits `minimum`, which it does.
+   * Nothing about the two reads differently at the call site, and the error only
+   * appears in production against the real API.
+   *
+   * LangChain removes exactly two things on the way out — `$schema` and
+   * `additionalProperties`, recursively — and passes everything else through
+   * verbatim. This test reproduces that step so it checks what is really sent
+   * rather than what Zod produced.
+   */
+  // tools.ts reaches env.ts at import time, which refuses to load without the
+  // service's real configuration. None of it is used here — the tools are only
+  // constructed, never called — so placeholders are enough to get the schemas.
+  Object.assign(process.env, {
+    ONBOARDING_SECRET: process.env["ONBOARDING_SECRET"] ?? "test",
+    MOBLD_SECRET: process.env["MOBLD_SECRET"] ?? "test",
+    SESSION_SECRET: process.env["SESSION_SECRET"] ?? "test",
+    DATABASE_URL: process.env["DATABASE_URL"] ?? "postgres://test/test",
+    WA_BUSINESS_ACCOUNT_ID: process.env["WA_BUSINESS_ACCOUNT_ID"] ?? "test",
+    WA_PHONE_NUMBER_ID: process.env["WA_PHONE_NUMBER_ID"] ?? "test",
+    WA_ACCESS_TOKEN: process.env["WA_ACCESS_TOKEN"] ?? "test",
+  });
+
+  const GEMINI_KEYWORDS = new Set([
+    "type", "format", "description", "nullable", "enum", "items", "properties",
+    "required", "minItems", "maxItems", "minimum", "maximum", "minLength",
+    "maxLength", "pattern", "example", "default", "anyOf", "propertyOrdering",
+    "title",
+  ]);
+
+  /** Mirrors @langchain/google-common's schemaToGeminiParameters. */
+  function asGeminiSees(node: unknown): unknown {
+    if (Array.isArray(node)) return node.map(asGeminiSees);
+    if (node === null || typeof node !== "object") return node;
+
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === "additionalProperties" || key === "$schema") continue;
+      out[key] = asGeminiSees(value);
+    }
+    return out;
+  }
+
+  /** Every keyword used anywhere in the schema, with the path that carries it. */
+  function keywords(node: unknown, path: string, into: string[], inProperties = false): void {
+    if (Array.isArray(node)) {
+      node.forEach((child, i) => keywords(child, `${path}[${i}]`, into));
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      // Keys directly under `properties` are field NAMES, not keywords.
+      if (!inProperties && !GEMINI_KEYWORDS.has(key)) {
+        into.push(`${path}.${key}`);
+      }
+      keywords(value, `${path}.${key}`, into, key === "properties");
+    }
+  }
+
+  it("uses no keyword Gemini would reject", async () => {
+    const { toJsonSchema } = await import("@langchain/core/utils/json_schema");
+    const { buildTools } = await import("../src/graph/tools.ts");
+
+    const offenders: string[] = [];
+    for (const tool of buildTools({ sessionId: 1, uid: 1, appId: null })) {
+      const found: string[] = [];
+      keywords(asGeminiSees(toJsonSchema(tool.schema)), "", found);
+      for (const path of new Set(found)) {
+        offenders.push(`${tool.name}${path}`);
+      }
+    }
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "These reach Gemini and 400 the whole request:\n  " + offenders.join("\n  "),
+    );
+  });
+
+  it("still describes every argument it accepts", async () => {
+    // The other half of the trade: a schema can be made Gemini-safe by stripping
+    // it down to `{type: "object"}`, which passes this suite and tells the model
+    // nothing. Every tool that takes arguments must still name them.
+    const { toJsonSchema } = await import("@langchain/core/utils/json_schema");
+    const { buildTools } = await import("../src/graph/tools.ts");
+
+    for (const tool of buildTools({ sessionId: 1, uid: 1, appId: null })) {
+      const schema = toJsonSchema(tool.schema) as {
+        properties?: Record<string, unknown>;
+      };
+      for (const [name, spec] of Object.entries(schema.properties ?? {})) {
+        const typed = spec as { type?: unknown; enum?: unknown; anyOf?: unknown };
+        assert.ok(
+          typed.type !== undefined || typed.enum !== undefined || typed.anyOf !== undefined,
+          `${tool.name}.${name} has no type the model can read`,
+        );
+      }
+    }
+  });
+});

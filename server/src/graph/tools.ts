@@ -787,7 +787,7 @@ export function buildTools(ctx: ToolContext) {
       );
 
       const already = new Set(facts.features);
-      const reasons = new Map(Object.entries(because ?? {}));
+      const reasons = new Map((because ?? []).map((r) => [r.feature, r.reason]));
 
       const card: Card = {
         kind: "features",
@@ -833,10 +833,19 @@ export function buildTools(ctx: ToolContext) {
           .array(z.string())
           .optional()
           .describe("Extra feature ids beyond the trade preset"),
+        // A list of pairs, not a map. `z.record()` emits its value type as
+        // `additionalProperties`, which LangChain strips before Gemini sees it
+        // — leaving a bare `{type: "object"}` with nothing to say what goes in
+        // it. That does not error; it just quietly arrives empty.
         because: z
-          .record(z.string())
+          .array(
+            z.object({
+              feature: z.string(),
+              reason: z.string().describe("One short line drawn from what they told you"),
+            }),
+          )
           .optional()
-          .describe("feature id -> one short reason drawn from what they told you"),
+          .describe("Why you are suggesting each extra"),
       }),
     },
   );
@@ -1006,11 +1015,16 @@ export function buildTools(ctx: ToolContext) {
       name: "setup_loyalty",
       description:
         "Turn on loyalty points and set the earn rate. `pointsPerUnit` is points earned per unit of currency spent; use `cashbackFraction` (e.g. 0.05 for 5%) only for cash back. Only after the app is built.",
+      // `.positive()` is deliberately not used anywhere in these schemas: Zod
+      // emits it as `exclusiveMinimum`, which Gemini's function-declaration
+      // schema does not have a field for, and it rejects the WHOLE request with
+      // a 400 — every tool, not just this one. `.min()` emits `minimum`, which
+      // Gemini does accept. See the schema test in test/pure.test.ts.
       schema: z.object({
         type: z.enum(["points", "item_points", "cashback"]).optional(),
-        pointsPerUnit: z.number().positive().optional(),
-        cashbackFraction: z.number().positive().max(0.5).optional(),
-        expiryDays: z.number().int().positive().optional(),
+        pointsPerUnit: z.number().min(0.0001).optional(),
+        cashbackFraction: z.number().min(0.0001).max(0.5).optional(),
+        expiryDays: z.number().int().min(1).optional(),
       }),
     },
   );

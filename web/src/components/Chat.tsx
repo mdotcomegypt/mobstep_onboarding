@@ -221,11 +221,8 @@ export function Chat({ session }: { session: SessionView }) {
       <div className="chat">
         <header className="chat-header">
           <div className="brand">
-            <span className="mark" aria-hidden="true">
-              <i />
-            </span>
+            <img className="wordmark" src="/mobstep-logo.png" alt="Mobstep" />
             <span className="brand-text">
-              <strong>Mobstep</strong>
               <em>building {facts?.name ?? "your app"}</em>
             </span>
           </div>

@@ -24,11 +24,15 @@
   --line: #1e2740;
   --line-soft: #172032;
 
-  /* accent — electric cyan, with violet as its far end */
-  --acc: #3ddcff;
-  --acc-2: #7c6bff;
-  --acc-dim: #1a6b85;
-  --acc-wash: rgba(61, 220, 255, 0.09);
+  /* Accent — Mobstep's own three, sampled from the logo mark rather than
+     approximated: the ascending bars run violet, blue, cyan. Cyan does the
+     pointing because it is the one with enough luminance to read as small text
+     on this ground; violet is the far end of every gradient. */
+  --acc: #00c8f8;
+  --acc-2: #3830e8;
+  --acc-mid: #0070f8;
+  --acc-dim: #0a6f8a;
+  --acc-wash: rgba(0, 200, 248, 0.09);
 
   /* ink */
   --ink: #e8eefc;
@@ -63,8 +67,8 @@ body {
   /* The ground: two soft lights over near-black, plus a faint grid. The grid
      is what stops a large dark area reading as an empty void. */
   background:
-    radial-gradient(1100px 700px at 15% -10%, rgba(124, 107, 255, 0.16), transparent 60%),
-    radial-gradient(900px 600px at 95% 8%, rgba(61, 220, 255, 0.12), transparent 55%),
+    radial-gradient(1100px 700px at 15% -10%, rgba(56, 48, 232, 0.20), transparent 60%),
+    radial-gradient(900px 600px at 95% 8%, rgba(0, 200, 248, 0.12), transparent 55%),
     linear-gradient(180deg, var(--deep), var(--void));
   background-attachment: fixed;
 }
@@ -103,7 +107,7 @@ body::before {
   padding: 30px 28px;
   box-shadow:
     0 30px 70px -30px rgba(0, 0, 0, .9),
-    0 0 0 1px rgba(61, 220, 255, .05),
+    0 0 0 1px rgba(0, 200, 248, .05),
     inset 0 1px 0 rgba(255, 255, 255, .04);
   backdrop-filter: blur(14px);
 }
@@ -143,12 +147,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   background: linear-gradient(135deg, var(--acc), var(--acc-2));
   color: #04121a; border: 0; border-radius: var(--r);
   font-weight: 700; text-align: center; text-decoration: none;
-  box-shadow: 0 10px 30px -12px rgba(61, 220, 255, .6);
+  box-shadow: 0 10px 30px -12px rgba(0, 200, 248, .6);
   transition: transform .12s, box-shadow .16s;
 }
 .button:hover, button.primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 16px 38px -14px rgba(61, 220, 255, .75);
+  box-shadow: 0 16px 38px -14px rgba(0, 200, 248, .75);
 }
 
 button.link, .link {
@@ -186,25 +190,14 @@ button.link:hover { text-decoration: underline; }
   position: sticky; top: 0; z-index: 5;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand .mark {
-  width: 30px; height: 30px; flex: none;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--acc), var(--acc-2));
-  display: grid; place-items: center;
-  box-shadow: 0 6px 18px -6px rgba(61, 220, 255, .7);
-}
-.brand .mark i {
-  width: 10px; height: 10px;
-  background: var(--void);
-  border-radius: 3px;
-  transform: rotate(45deg);
-}
-.brand-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
-.brand-text strong { font-size: 14px; letter-spacing: -.01em; }
+.brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+/* The real wordmark, which already carries the name — so no text beside it. */
+.brand .wordmark { height: 19px; width: auto; flex: none; display: block; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
 .brand-text em {
   font-style: normal; font-size: 11.5px; color: var(--ink-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding-left: 11px; border-left: 1px solid var(--line);
 }
 
 .who {
@@ -222,7 +215,7 @@ button.link:hover { text-decoration: underline; }
 .rail-track i {
   display: block; height: 100%;
   background: linear-gradient(90deg, var(--acc-2), var(--acc));
-  box-shadow: 0 0 12px rgba(61, 220, 255, .8);
+  box-shadow: 0 0 12px rgba(0, 200, 248, .8);
   transition: width .5s cubic-bezier(.2, .8, .2, 1);
 }
 
@@ -242,12 +235,12 @@ button.link:hover { text-decoration: underline; }
 .rail-step.is-active .node {
   background: var(--acc);
   transform: scale(1.35);
-  box-shadow: 0 0 0 3px var(--deep), 0 0 14px 2px rgba(61, 220, 255, .75);
+  box-shadow: 0 0 0 3px var(--deep), 0 0 14px 2px rgba(0, 200, 248, .75);
   animation: nodePulse 2.4s ease-in-out infinite;
 }
 @keyframes nodePulse {
-  0%, 100% { box-shadow: 0 0 0 3px var(--deep), 0 0 10px 1px rgba(61, 220, 255, .55); }
-  50%      { box-shadow: 0 0 0 3px var(--deep), 0 0 20px 4px rgba(61, 220, 255, .95); }
+  0%, 100% { box-shadow: 0 0 0 3px var(--deep), 0 0 10px 1px rgba(0, 200, 248, .55); }
+  50%      { box-shadow: 0 0 0 3px var(--deep), 0 0 20px 4px rgba(0, 200, 248, .95); }
 }
 
 .rail-label { font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
@@ -307,14 +300,14 @@ button.link:hover { text-decoration: underline; }
 .avatar {
   width: 28px; height: 28px; flex: none; margin-top: 2px;
   border-radius: 9px;
-  background: linear-gradient(140deg, rgba(61, 220, 255, .2), rgba(124, 107, 255, .2));
+  background: linear-gradient(140deg, rgba(0, 200, 248, .2), rgba(56, 48, 232, .2));
   border: 1px solid var(--line);
   display: grid; place-items: center;
 }
 .avatar i {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--acc);
-  box-shadow: 0 0 10px rgba(61, 220, 255, .9);
+  box-shadow: 0 0 10px rgba(0, 200, 248, .9);
 }
 .avatar.is-live i { animation: nodePulse 1.6s ease-in-out infinite; }
 
@@ -327,8 +320,8 @@ button.link:hover { text-decoration: underline; }
   box-shadow: 0 14px 34px -22px rgba(0, 0, 0, .9);
 }
 .turn-user .bubble {
-  background: linear-gradient(135deg, rgba(61, 220, 255, .16), rgba(124, 107, 255, .18));
-  border-color: rgba(61, 220, 255, .22);
+  background: linear-gradient(135deg, rgba(0, 200, 248, .16), rgba(56, 48, 232, .22));
+  border-color: rgba(0, 200, 248, .22);
   border-radius: 16px 4px 16px 16px;
 }
 
@@ -361,7 +354,7 @@ button.link:hover { text-decoration: underline; }
 }
 .steps li.is-running .step-mark {
   background: var(--acc);
-  box-shadow: 0 0 8px rgba(61, 220, 255, .9);
+  box-shadow: 0 0 8px rgba(0, 200, 248, .9);
   animation: nodePulse 1.4s ease-in-out infinite;
 }
 .steps li.is-done .step-mark { background: var(--ok); }
@@ -378,9 +371,9 @@ button.link:hover { text-decoration: underline; }
   min-width: 250px; max-width: 420px;
   padding: 13px 15px;
   background: linear-gradient(180deg, rgba(20, 27, 45, .95), rgba(15, 21, 36, .95));
-  border: 1px solid rgba(61, 220, 255, .2);
+  border: 1px solid rgba(0, 200, 248, .2);
   border-radius: 4px 16px 16px 16px;
-  box-shadow: 0 0 34px -14px rgba(61, 220, 255, .5);
+  box-shadow: 0 0 34px -14px rgba(0, 200, 248, .5);
 }
 .activity-head { display: flex; align-items: center; gap: 9px; }
 .activity-head strong { font-size: 13.5px; font-weight: 600; }
@@ -413,7 +406,7 @@ button.link:hover { text-decoration: underline; }
 .activity-bar i {
   display: block; height: 100%; border-radius: 3px;
   background: linear-gradient(90deg, var(--acc-2), var(--acc));
-  box-shadow: 0 0 10px rgba(61, 220, 255, .8);
+  box-shadow: 0 0 10px rgba(0, 200, 248, .8);
   transition: width .45s cubic-bezier(.2, .8, .2, 1);
 }
 .activity-bar.is-indeterminate i {
@@ -482,7 +475,7 @@ button.link:hover { text-decoration: underline; }
 }
 .palette:hover:not(:disabled) {
   border-color: var(--acc-dim); transform: translateY(-2px);
-  box-shadow: 0 14px 30px -18px rgba(61, 220, 255, .6);
+  box-shadow: 0 14px 30px -18px rgba(0, 200, 248, .6);
 }
 .palette-preview {
   border-radius: 7px; padding: 9px; display: flex; flex-direction: column; gap: 6px;
@@ -679,7 +672,7 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
 .icon-button.send {
   background: linear-gradient(135deg, var(--acc), var(--acc-2));
   color: #04121a;
-  box-shadow: 0 8px 22px -10px rgba(61, 220, 255, .8);
+  box-shadow: 0 8px 22px -10px rgba(0, 200, 248, .8);
 }
 .icon-button.send:disabled { background: var(--panel-2); color: var(--ink-faint); box-shadow: none; }
 
@@ -698,7 +691,7 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
   background: rgba(10, 14, 26, .45);
   border: 1px solid var(--line-soft);
 }
-.features li.is-on { border-color: rgba(61, 220, 255, .22); background: var(--acc-wash); }
+.features li.is-on { border-color: rgba(0, 200, 248, .22); background: var(--acc-wash); }
 
 .feature-mark {
   width: 15px; height: 15px; flex: none; border-radius: 5px;
@@ -760,7 +753,7 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
   border-radius: 34px;
   box-shadow:
     0 40px 80px -34px rgba(0, 0, 0, 1),
-    0 0 0 1px rgba(61, 220, 255, .1),
+    0 0 0 1px rgba(0, 200, 248, .1),
     inset 0 1px 0 rgba(255, 255, 255, .07);
 }
 .phone-notch {
@@ -938,7 +931,7 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
     left: 50%; bottom: 88px; transform: translateX(-50%);
     padding: 8px 16px; border-radius: 999px;
     background: rgba(20, 27, 45, .95);
-    border: 1px solid rgba(61, 220, 255, .28);
+    border: 1px solid rgba(0, 200, 248, .28);
     color: var(--acc); font-size: 12px; font-weight: 600;
     backdrop-filter: blur(12px);
     box-shadow: 0 12px 30px -14px rgba(0, 0, 0, .9);
