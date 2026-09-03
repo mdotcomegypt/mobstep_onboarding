@@ -35,10 +35,27 @@ const NO_TEXT =
   "no colour names, no labels, no captions, no watermark, no signature. " +
   "The hex value above is an instruction about colour, never something to draw.";
 
+/**
+ * House style for icons. Consistency across a set matters more than any one icon.
+ *
+ * Note what it does NOT ask for: transparency. The image model returns RGB with
+ * no alpha channel — it cannot produce a transparent pixel. Asked for "a fully
+ * transparent background" it draws the *depiction* of one, and a third of the
+ * first generated set came back with a grey-and-white checkerboard painted into
+ * the image. Exactly the same mistake as the placeholder that rendered the
+ * literal string "D31130": the model illustrates the instruction instead of
+ * obeying it.
+ *
+ * So the background is asked for as what it should actually be — a flat tile in
+ * the app's own surface colour, which is what the icon sits on anyway.
+ */
 const ICON_STYLE = [
-  "Flat vector icon, minimal, geometric, single solid colour on a fully transparent background.",
-  "Centered, generous even padding, no drop shadow, no gradient, no outline frame, no background shape.",
+  "Flat vector icon, minimal, geometric, a single solid colour on a plain flat background.",
+  "Centered, generous even padding, no drop shadow, no gradient, no outline frame.",
   "Thick confident shapes that stay legible at 48x48 pixels.",
+  "The background must be one flat, perfectly uniform colour filling the whole square —",
+  "never a checkerboard, never a grid, never a chequered or dotted pattern, and never",
+  "any depiction of transparency.",
 ].join(" ");
 
 const PHOTO_STYLE = [
@@ -142,6 +159,7 @@ export async function generateCategoryIcons(
   businessType: string,
 ): Promise<{ icons: CategoryIcon[]; failed: Array<{ category: string; reason: string }> }> {
   const colour = palette?.brand ?? "#111827";
+  const surface = palette?.surface ?? "#ffffff";
 
   report({ label: "Working out what each section should look like" });
   const subjects = await describeForIcons(categories, businessType);
@@ -154,7 +172,7 @@ export async function generateCategoryIcons(
       const prompt = [
         `${ICON_STYLE}`,
         `Subject: ${subject}.`,
-        `Colour: fill every shape in solid ${colour}. Use only that one colour.`,
+        `Colour: draw the subject in solid ${colour} on a flat ${surface} background. Only those two colours.`,
         `This icon belongs to a set for a ${businessType || "shop"} app; keep the weight and level of detail identical across the set.`,
         NO_TEXT,
       ].join(" ");
@@ -321,6 +339,54 @@ export async function generateLogo(
     return await store(sessionId, image, "logo.png", "logo", prompt);
   } catch (error) {
     trace("imagery.logo_failed", {
+      reason: (error as Error).message.replace(/\s+/g, " ").slice(0, 160),
+    });
+    return null;
+  }
+}
+
+/**
+ * Background art for a promotional banner.
+ *
+ * Art only. The offer's wording is a field the app composites over this, and
+ * that separation is not a nicety:
+ *
+ *   - Arabic set inside a generated image comes out as mangled letterforms
+ *     every time, and this market's offers are written in Arabic.
+ *   - Baked-in text cannot be translated, so a bilingual app shows one language
+ *     to everyone.
+ *   - Changing "20% off" to "25% off" would mean regenerating the picture.
+ *
+ * The first placeholder this service generated proved the risk on its own: it
+ * rendered the literal string "D31130" into the image, purely because the hex
+ * appeared in the prompt. A banner is the one image an owner is most likely to
+ * want words on, which makes it the one that most needs them kept out.
+ */
+export async function generateBanner(
+  sessionId: number,
+  brief: string,
+  palette: Palette | undefined,
+  businessType: string,
+): Promise<Artwork | null> {
+  const brand = palette?.brand ?? "#111827";
+
+  const prompt = [
+    `A wide 16:6 promotional banner background for a ${businessType || "shop"} app.`,
+    `Subject: ${brief}.`,
+    "Rich, appetising, professionally lit photography with a shallow depth of field.",
+    `Composition: the subject sits to one side, leaving the opposite third clean and`,
+    `uncluttered — a caption will be laid over that space, so it must stay simple.`,
+    `Grade it so ${brand} sits naturally in the scene rather than being pasted on.`,
+    NO_TEXT,
+  ].join(" ");
+
+  report({ label: "Painting the banner background" });
+
+  try {
+    const image = await generateImage(prompt, { timeoutMs: 60_000 });
+    return await store(sessionId, image, "offer-banner.png", "banner", prompt);
+  } catch (error) {
+    trace("imagery.banner_failed", {
       reason: (error as Error).message.replace(/\s+/g, " ").slice(0, 160),
     });
     return null;

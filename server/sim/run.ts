@@ -623,6 +623,7 @@ async function collect(
       catalog: [...drupalState.catalog.entries()].map(([id, rows]) => ({ app: id, categories: rows })),
       themeKeys: [...drupalState.themeKeys.entries()].map(([id, keys]) => ({ app: id, keys })),
       assets: [...drupalState.assets.entries()].map(([id, rows]) => ({ app: id, assets: rows })),
+      features: [...drupalState.features.entries()].map(([id, list]) => ({ app: id, features: list })),
     },
     events,
     trace: traceEvents,
@@ -650,6 +651,8 @@ async function collect(
   console.log(`  items              ${totalItems}  (${photographed} photographed)`);
   console.log(`  placeholder        ${(facts?.["artwork"] as { placeholderUrl?: string })?.placeholderUrl ? "yes" : "no"}`);
   console.log(`  branches           ${((facts?.["locations"] as { branches?: unknown[] })?.branches ?? []).length}`);
+  const features = (facts?.["features"] as string[] | undefined) ?? [];
+  console.log(`  features           ${features.length}${features.length ? "  " + features.join(", ") : ""}`);
   console.log(`  app id             ${String(facts?.["appId"] ?? "—")}`);
   console.log(`  package            ${String(facts?.["packageName"] ?? "—")}`);
   console.log("");

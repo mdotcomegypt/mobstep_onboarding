@@ -26,6 +26,19 @@ export interface CatalogCard {
   }>;
 }
 
+export interface FeaturesCard {
+  kind: "features";
+  title: string;
+  caption?: string;
+  options: Array<{
+    id: string;
+    label: string;
+    blurb: string;
+    on: boolean;
+    because?: string;
+  }>;
+}
+
 export interface GalleryCard {
   kind: "gallery";
   title: string;
@@ -40,6 +53,7 @@ export type Card =
   | { kind: "table"; title: string; columns: string[]; rows: string[][] }
   | CatalogCard
   | GalleryCard
+  | FeaturesCard
   | { kind: "progress"; label: string; status: "running" | "success" | "failed"; log?: string }
   | { kind: "link"; label: string; href: string }
   | { kind: "attachment"; url: string; filename: string; mime: string }

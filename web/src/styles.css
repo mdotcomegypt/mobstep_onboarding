@@ -689,10 +689,49 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
 }
 .hint-live { display: inline-flex; align-items: center; gap: 7px; color: var(--acc); }
 
+/* --- features card ---------------------------------------------------------- */
+
+.features { list-style: none; margin: 10px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.features li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-sm);
+  background: rgba(10, 14, 26, .45);
+  border: 1px solid var(--line-soft);
+}
+.features li.is-on { border-color: rgba(61, 220, 255, .22); background: var(--acc-wash); }
+
+.feature-mark {
+  width: 15px; height: 15px; flex: none; border-radius: 5px;
+  border: 1.5px solid var(--line); position: relative;
+}
+.features li.is-on .feature-mark {
+  background: linear-gradient(135deg, var(--acc), var(--acc-2));
+  border-color: transparent;
+}
+.features li.is-on .feature-mark::after {
+  content: ""; position: absolute; left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border-right: 2px solid var(--void); border-bottom: 2px solid var(--void);
+  transform: rotate(45deg);
+}
+
+.feature-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.feature-text b { font-size: 12.5px; font-weight: 600; }
+.feature-text i {
+  font-style: normal; font-size: 11.5px; color: var(--ink-faint); line-height: 1.4;
+}
+.feature-toggle {
+  flex: none; padding: 4px 10px; border-radius: 999px;
+  background: none; border: 1px solid var(--line);
+  color: var(--ink-dim); font-size: 11px; font-weight: 600;
+  transition: color .16s, border-color .16s;
+}
+.feature-toggle:hover:not(:disabled) { color: var(--acc); border-color: var(--acc-dim); }
+
 /* --- app preview ------------------------------------------------------------ */
 
 .preview {
-  display: flex; flex-direction: column; gap: 14px;
+  display: flex; flex-direction: column; gap: 12px;
   padding: 20px 18px;
   background: rgba(10, 14, 26, .6);
   border-left: 1px solid var(--line-soft);
@@ -700,10 +739,17 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
 }
 
 .preview-head { display: flex; align-items: baseline; gap: 8px; }
-.preview-label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--acc); font-weight: 700; }
+.preview-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-dim); font-weight: 700;
+}
+/* Live means the pane is reading the built app's own config. It is a different
+   claim from a projection, so it is a different colour. */
+.preview-label.is-live { color: var(--ok); }
 .preview-label em { font-style: normal; color: var(--ink-faint); margin-left: 5px; font-family: var(--mono); }
 .preview-count { margin-left: auto; font-size: 11px; color: var(--ink-faint); font-family: var(--mono); }
 .preview-close { display: none; }
+.preview-mode { margin: -4px 0 0; font-size: 11px; color: var(--ink-faint); line-height: 1.45; }
 
 .phone {
   position: relative;
@@ -723,44 +769,129 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
   background: rgba(0, 0, 0, .6); z-index: 2;
 }
 .phone-screen {
+  position: relative;
   height: 100%; border-radius: 26px; overflow: hidden;
   display: flex; flex-direction: column;
   font-size: 11px;
+}
+
+/* --- rendered blocks -------------------------------------------------------- */
+
+.pv-bar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 17px 11px 9px; flex: none;
   transition: background .45s, color .45s;
 }
-
-.app-bar { display: flex; align-items: center; gap: 7px; padding: 17px 11px 9px; transition: background .45s; }
-.app-logo { width: 21px; height: 21px; border-radius: 6px; object-fit: cover; background: rgba(255, 255, 255, .2); }
-.app-logo-empty { background: rgba(255, 255, 255, .22); }
-.app-name { font-size: 11.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-cart { margin-left: auto; width: 15px; height: 15px; border-radius: 4px; background: rgba(255, 255, 255, .28); }
-
-.app-search { margin: 9px 9px 0; padding: 6px 9px; border: 1px solid; border-radius: 8px; font-size: 10px; }
-
-.app-cats { display: flex; gap: 8px; padding: 10px 9px 2px; overflow-x: auto; scrollbar-width: none; }
-.app-cats::-webkit-scrollbar { display: none; }
-.app-cat { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 46px; flex: none; }
-.app-cat-icon {
-  width: 40px; height: 40px; border-radius: 12px; border: 1px solid;
-  display: grid; place-items: center; overflow: hidden;
-  background: #ffffff;
+.pv-screen {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  transition: background .45s, color .45s;
 }
-.app-cat-icon img { width: 26px; height: 26px; object-fit: contain; }
-.app-cat-name { font-size: 8px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; opacity: .8; }
+.pv-family { display: flex; flex-direction: column; gap: 7px; padding: 8px 9px; }
+.pv-content { flex: 1; overflow: hidden; align-content: start; }
+.pv-footer { padding-top: 0; }
+.pv-header { padding-bottom: 0; }
 
-.app-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 10px 9px; flex: 1; align-content: start; overflow: hidden; }
-.app-item { display: flex; flex-direction: column; gap: 3px; border: 1px solid; border-radius: 9px; padding: 5px; }
-.app-item-img { display: block; width: 100%; aspect-ratio: 1.4; border-radius: 6px; overflow: hidden; background: rgba(127, 127, 127, .12); }
-.app-item-img img { width: 100%; height: 100%; object-fit: cover; }
-.app-item-name { font-size: 8.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-item-price { font-size: 8.5px; font-weight: 700; }
+.pv-logo { width: 21px; height: 21px; border-radius: 6px; object-fit: cover; flex: none; }
+.pv-logo-empty { background: rgba(255, 255, 255, .22); }
+.pv-name { font-size: 11.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-icon { width: 15px; height: 15px; border-radius: 4px; background: currentColor; opacity: .3; flex: none; }
+.pv-burger { border-radius: 2px; }
+.pv-round { border-radius: 50%; margin-left: auto; }
+.pv-search-icon {
+  width: 13px; height: 13px; flex: none; margin-left: auto;
+  border: 1.6px solid currentColor; border-radius: 50%; opacity: .55;
+}
 
-.app-cta { margin: 0 9px 11px; padding: 8px; border-radius: 9px; text-align: center; font-size: 10.5px; font-weight: 700; transition: background .45s; }
+.pv-segmented {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid; border-radius: 999px; padding: 2px; font-size: 8.5px; font-weight: 700;
+}
+.pv-segmented b { padding: 3px 9px; border-radius: 999px; }
+.pv-segmented i { padding: 3px 9px; font-style: normal; opacity: .55; }
 
-/* Anything not yet decided shows as a breathing skeleton, so the preview is
-   legible as "not filled in yet" rather than as broken. */
+.pv-banner {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 9px 11px; border-radius: 9px;
+}
+.pv-banner b { font-size: 13px; }
+.pv-banner i { font-style: normal; font-size: 8.5px; opacity: .85; }
+
+.pv-alert {
+  padding: 5px 9px; border: 1px dashed; border-radius: 7px;
+  font-size: 8.5px; font-weight: 600;
+}
+.pv-branch, .pv-searchbar {
+  padding: 6px 9px; border: 1px solid; border-radius: 8px;
+  font-size: 9px; opacity: .8;
+}
+.pv-branch b { font-style: normal; }
+
+.pv-cats { display: flex; gap: 8px; overflow: hidden; }
+.pv-cat { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px; flex: none; }
+.pv-cat-icon {
+  width: 38px; height: 38px; border-radius: 12px; border: 1px solid;
+  display: grid; place-items: center; overflow: hidden;
+  background: rgba(127, 127, 127, .08);
+}
+.pv-cat-icon img { width: 24px; height: 24px; object-fit: contain; }
+.pv-cat-name {
+  font-size: 7.5px; text-align: center; opacity: .8; width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.pv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.pv-item { display: flex; flex-direction: column; gap: 3px; border: 1px solid; border-radius: 9px; padding: 5px; }
+.pv-item-img {
+  display: block; width: 100%; aspect-ratio: 1.4; border-radius: 6px;
+  overflow: hidden; background: rgba(127, 127, 127, .12);
+}
+.pv-item-img img { width: 100%; height: 100%; object-fit: cover; }
+.pv-item-name { font-size: 8.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-item-price { font-size: 8.5px; font-weight: 700; }
+
+.pv-highlights { display: flex; gap: 6px; }
+.pv-highlight {
+  flex: 1; aspect-ratio: 1.7; border: 1px solid; border-radius: 8px;
+  overflow: hidden; background: rgba(127, 127, 127, .1);
+}
+.pv-highlight img { width: 100%; height: 100%; object-fit: cover; }
+
+.pv-loyalty { display: flex; flex-direction: column; gap: 1px; padding: 8px 11px; border-radius: 9px; }
+.pv-loyalty b { font-size: 12px; }
+.pv-loyalty i { font-style: normal; font-size: 8px; opacity: .85; }
+
+.pv-strip {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px; border: 1px solid; border-radius: 8px; font-size: 9px;
+}
+.pv-strip b { font-size: 9px; }
+.pv-strip i { font-style: normal; }
+
+.pv-cta { padding: 8px; border-radius: 9px; text-align: center; font-size: 10.5px; font-weight: 700; }
+
+.pv-drawer {
+  position: absolute; left: 9px; right: 9px; bottom: 9px;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 9px; border: 1px solid; border-radius: 12px;
+  background: rgba(0, 0, 0, .55); backdrop-filter: blur(6px);
+}
+.pv-drawer-label {
+  font-size: 7.5px; text-transform: uppercase; letter-spacing: .1em;
+  color: rgba(255, 255, 255, .45); margin-bottom: 2px;
+}
+.pv-row { display: flex; align-items: center; gap: 7px; font-size: 8.5px; color: rgba(255, 255, 255, .82); }
+.pv-row-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+
+/* A block the renderer has no drawing for still holds its slot, named. The core
+   gains blocks faster than this file does, and an empty gap would be a lie. */
+.pv-unknown {
+  padding: 5px 8px; border-radius: 6px;
+  border: 1px dashed rgba(127, 127, 127, .4);
+  font-size: 8px; opacity: .55;
+}
+
 .is-skeleton { opacity: .3; }
-.is-skeleton .app-item-img, .is-skeleton .app-cat-icon { animation: breathe 2.4s ease-in-out infinite; }
+.is-skeleton .pv-item-img, .is-skeleton .pv-cat-icon { animation: breathe 2.4s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 
 .preview-facts { margin: 0; display: flex; flex-direction: column; gap: 1px; }

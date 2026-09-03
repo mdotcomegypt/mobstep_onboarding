@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Card, CatalogCard, GalleryCard, Palette } from "../lib/chat.ts";
+import type { Card, CatalogCard, FeaturesCard, GalleryCard, Palette } from "../lib/chat.ts";
 
 /**
  * Chat cards.
@@ -30,6 +30,8 @@ export function CardView({
       return <CatalogView card={card} currency={currency} />;
     case "gallery":
       return <GalleryView card={card} />;
+    case "features":
+      return <FeaturesView card={card} onReply={onReply} disabled={disabled} />;
     case "table":
       return <TableCard title={card.title} columns={card.columns} rows={card.rows} />;
     case "progress":
@@ -131,6 +133,66 @@ function CatalogView({ card, currency }: { card: CatalogCard; currency: string |
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * What the app will do, in the owner's language.
+ *
+ * Everything shown is already on — the preset for their trade is the answer to
+ * "what does a shop like mine need", and making them tick fifteen boxes to get
+ * the obvious ones is the opposite of help. The card is a statement they can
+ * amend, not a form they have to fill in.
+ */
+function FeaturesView({
+  card,
+  onReply,
+  disabled,
+}: {
+  card: FeaturesCard;
+  onReply: (text: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="card-block features-card">
+      <p className="card-title">{card.title}</p>
+      {card.caption && <p className="card-sub">{card.caption}</p>}
+
+      <ul className="features">
+        {card.options.map((feature) => (
+          <li key={feature.id} className={feature.on ? "is-on" : ""}>
+            <span className="feature-mark" aria-hidden="true" />
+            <span className="feature-text">
+              <b>{feature.label}</b>
+              <i>{feature.because ?? feature.blurb}</i>
+            </span>
+            <button
+              type="button"
+              className="feature-toggle"
+              disabled={disabled}
+              onClick={() =>
+                onReply(
+                  feature.on
+                    ? `Leave out ${feature.label.toLowerCase()}.`
+                    : `Add ${feature.label.toLowerCase()}.`,
+                )
+              }
+            >
+              {feature.on ? "Remove" : "Add"}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <button
+        type="button"
+        className="link"
+        disabled={disabled}
+        onClick={() => onReply("That all looks right, keep it as it is.")}
+      >
+        Looks right
+      </button>
     </div>
   );
 }

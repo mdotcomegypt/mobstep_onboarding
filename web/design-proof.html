@@ -223,7 +223,29 @@
         </div>
       </article>
 
-      <p class="proof-note"><b>5 · Live activity.</b> What replaces a spinner. An icon batch runs for two minutes; an indeterminate spinner held that long is indistinguishable from a hang, and owners reload.</p>
+      <p class="proof-note"><b>5 · Features.</b> Everything is already ticked — the preset for their trade answers "what does a shop like mine need". The agent asks about at most two extras it can actually justify from the conversation.</p>
+
+      <article class="turn turn-assistant">
+        <span class="avatar"><i></i></span>
+        <div class="turn-body">
+          <div class="bubble">Your app will browse the menu, take orders, handle delivery or pickup, and remember past orders. Your menu shows sizes for the pizzas — shall I add options and extras so customers can pick one?</div>
+          <div class="card-block features-card">
+            <p class="card-title">What a Food &amp; Beverage app usually needs</p>
+            <p class="card-sub">The basics are already in. Tell me which of the extras you want, or say "all of them".</p>
+            <ul class="features">
+              <li class="is-on"><span class="feature-mark"></span><span class="feature-text"><b>Browse the menu</b><i>Categories and items, the screen customers land on.</i></span><button type="button" class="feature-toggle">Remove</button></li>
+              <li class="is-on"><span class="feature-mark"></span><span class="feature-text"><b>Cart and checkout</b><i>Customers add items to a basket and place an order.</i></span><button type="button" class="feature-toggle">Remove</button></li>
+              <li class="is-on"><span class="feature-mark"></span><span class="feature-text"><b>Delivery and pickup</b><i>Customers choose delivery or collection before they order.</i></span><button type="button" class="feature-toggle">Remove</button></li>
+              <li class="is-on"><span class="feature-mark"></span><span class="feature-text"><b>Options and extras</b><i>Your menu shows three sizes for every pizza.</i></span><button type="button" class="feature-toggle">Remove</button></li>
+              <li><span class="feature-mark"></span><span class="feature-text"><b>WhatsApp button</b><i>You gave me a WhatsApp number for the Nasr City branch.</i></span><button type="button" class="feature-toggle">Add</button></li>
+              <li><span class="feature-mark"></span><span class="feature-text"><b>Loyalty points</b><i>Customers earn points on every order and spend them on future ones.</i></span><button type="button" class="feature-toggle">Add</button></li>
+            </ul>
+            <button type="button" class="link">Looks right</button>
+          </div>
+        </div>
+      </article>
+
+      <p class="proof-note"><b>6 · Live activity.</b> What replaces a spinner. An icon batch runs for two minutes; an indeterminate spinner held that long is indistinguishable from a hang, and owners reload.</p>
 
       <article class="turn turn-assistant">
         <span class="avatar is-live"><i></i></span>
@@ -240,7 +262,7 @@
         </div>
       </article>
 
-      <p class="proof-note"><b>6 · Retry, error, and the build.</b> A transient provider failure is announced and retried inside the open stream rather than dropped on the owner.</p>
+      <p class="proof-note"><b>7 · Retry, error, and the build.</b> A transient provider failure is announced and retried inside the open stream rather than dropped on the owner.</p>
 
       <div class="retry-bar"><span class="pulse"></span>Still busy on our side. Giving it another go.<em>attempt 2 of 4</em></div>
 
@@ -284,38 +306,62 @@ BUILD SUCCESSFUL in 1m 47s</pre>
 
   <aside class="preview" aria-label="Preview of your app">
     <div class="preview-head">
-      <span class="preview-label">Live preview<em>#9000</em></span>
+      <span class="preview-label is-live">Live<em>#9000</em></span>
       <span class="preview-count">6 sections · 96 items</span>
     </div>
+    <p class="preview-mode">Read from your app's own configuration.</p>
 
     <div class="phone">
       <span class="phone-notch"></span>
-      <div class="phone-screen" style="background:#F2F4F6;color:#242526">
-        <header class="app-bar" style="background:#D31130;color:#FFFFFF">
-          <span class="app-logo app-logo-empty"></span>
-          <span class="app-name">Rosto Fried Chicken</span>
-          <span class="app-cart"></span>
+      <div class="phone-screen">
+        <header class="pv-bar" style="background:#D31130;color:#FFFFFF">
+          <span class="pv-icon pv-burger"></span>
+          <span class="pv-logo pv-logo-empty"></span>
+          <span class="pv-name">Rosto Fried Chicken</span>
+          <span class="pv-search-icon"></span>
         </header>
-        <div class="app-search" style="border-color:#666A72"><span style="opacity:.45">Search the menu…</span></div>
-        <div class="app-cats">
-          <span class="app-cat"><span class="app-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-3.png" alt=""></span><span class="app-cat-name">بيتزا</span></span>
-          <span class="app-cat"><span class="app-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-manakeesh.png" alt=""></span><span class="app-cat-name">مناقيش</span></span>
-          <span class="app-cat"><span class="app-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-6.png" alt=""></span><span class="app-cat-name">موتزريلا</span></span>
-          <span class="app-cat"><span class="app-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-7.png" alt=""></span><span class="app-cat-name">كرافت</span></span>
-          <span class="app-cat"><span class="app-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-8.png" alt=""></span><span class="app-cat-name">فطائر</span></span>
+
+        <div class="pv-screen" style="background:#F2F4F6;color:#242526">
+          <div class="pv-family pv-header">
+            <span class="pv-alert" style="border-color:#D31130;color:#D31130">Open until 2am tonight</span>
+            <span class="pv-banner" style="background:#D31130;color:#FFFFFF"><b>20% off</b><i>this week only</i></span>
+          </div>
+
+          <div class="pv-family pv-content">
+            <span class="pv-branch" style="border-color:#666A72"><b style="color:#D31130">◉</b> Nasr City</span>
+            <span class="pv-cats">
+              <span class="pv-cat"><span class="pv-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-3.png" alt=""></span><span class="pv-cat-name">بيتزا</span></span>
+              <span class="pv-cat"><span class="pv-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-manakeesh.png" alt=""></span><span class="pv-cat-name">مناقيش</span></span>
+              <span class="pv-cat"><span class="pv-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-6.png" alt=""></span><span class="pv-cat-name">موتزريلا</span></span>
+              <span class="pv-cat"><span class="pv-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-7.png" alt=""></span><span class="pv-cat-name">كرافت</span></span>
+              <span class="pv-cat"><span class="pv-cat-icon" style="border-color:#666A72"><img src="../server/sim/out/artwork/category_icon-icon-category-8.png" alt=""></span><span class="pv-cat-name">فطائر</span></span>
+            </span>
+            <span class="pv-grid">
+              <span class="pv-item" style="border-color:#666A72"><span class="pv-item-img"><img src="../server/sim/out/artwork/item_photo-item-item-3.png" alt=""></span><span class="pv-item-name">بيتزا مارغريتا</span><span class="pv-item-price" style="color:#D31130">110 EGP</span></span>
+              <span class="pv-item" style="border-color:#666A72"><span class="pv-item-img"><img src="../server/sim/out/artwork/item_photo-item-item-1.png" alt=""></span><span class="pv-item-name">سوبر سوبريم</span><span class="pv-item-price" style="color:#D31130">120 EGP</span></span>
+              <span class="pv-item" style="border-color:#666A72"><span class="pv-item-img"><img src="../server/sim/out/artwork/placeholder-item-placeholder.png" alt=""></span><span class="pv-item-name">بيتزا فور سيزون</span><span class="pv-item-price" style="color:#D31130">115 EGP</span></span>
+              <span class="pv-item" style="border-color:#666A72"><span class="pv-item-img"><img src="../server/sim/out/artwork/item_photo-item-item-4.png" alt=""></span><span class="pv-item-name">جبنة شامية</span><span class="pv-item-price" style="color:#D31130">17 EGP</span></span>
+            </span>
+            <!-- A block the registry has no drawing for: named, present, and
+                 visibly a placeholder rather than a silent gap. -->
+            <span class="pv-unknown">Delivery areas</span>
+          </div>
+
+          <div class="pv-family pv-footer">
+            <span class="pv-cta" style="background:#D31130;color:#FFFFFF">View cart · 2 items</span>
+          </div>
         </div>
-        <div class="app-grid">
-          <span class="app-item" style="border-color:#666A72"><span class="app-item-img"><img src="../server/sim/out/artwork/item_photo-item-item-3.png" alt=""></span><span class="app-item-name">بيتزا مارغريتا</span><span class="app-item-price" style="color:#D31130">110 EGP</span></span>
-          <span class="app-item" style="border-color:#666A72"><span class="app-item-img"><img src="../server/sim/out/artwork/item_photo-item-item-1.png" alt=""></span><span class="app-item-name">سوبر سوبريم</span><span class="app-item-price" style="color:#D31130">120 EGP</span></span>
-          <span class="app-item" style="border-color:#666A72"><span class="app-item-img"><img src="../server/sim/out/artwork/placeholder-item-placeholder.png" alt=""></span><span class="app-item-name">بيتزا فور سيزون</span><span class="app-item-price" style="color:#D31130">115 EGP</span></span>
-          <span class="app-item" style="border-color:#666A72"><span class="app-item-img"><img src="../server/sim/out/artwork/item_photo-item-item-4.png" alt=""></span><span class="app-item-name">جبنة شامية</span><span class="app-item-price" style="color:#D31130">17 EGP</span></span>
-        </div>
-        <div class="app-cta" style="background:#D31130;color:#FFFFFF">Order now</div>
       </div>
     </div>
 
     <dl class="preview-facts">
       <div class="fact"><dt>Business</dt><dd>Rosto Fried Chicken</dd></div>
+      <div class="fact"><dt>Trade</dt><dd>Food &amp; Beverage</dd></div>
+      <div class="fact"><dt>Branches</dt><dd>2</dd></div>
+      <div class="fact"><dt>Brand</dt><dd><i class="fact-swatch" style="background:#D31130"></i>#D31130</dd></div>
+      <div class="fact"><dt>Features</dt><dd>12</dd></div>
+    </dl>
+  </aside>
       <div class="fact"><dt>Trade</dt><dd>Food &amp; Beverage</dd></div>
       <div class="fact"><dt>Branches</dt><dd>2</dd></div>
       <div class="fact"><dt>Brand</dt><dd><i class="fact-swatch" style="background:#D31130"></i>#D31130</dd></div>

@@ -1,56 +1,90 @@
+import { useEffect, useState } from "react";
 import type { PreviewFacts } from "../lib/chat.ts";
+import { loadPreview, type LivePreview } from "../lib/preview.ts";
+import { AppBar, Screen, type ScreenConfig } from "./preview/Screen.tsx";
+import type { BlockContext } from "./preview/blocks.tsx";
 
 /**
- * A live mock of the app being built.
+ * The app being built.
  *
- * This is the "step preview": rather than describing decisions in prose, it
- * renders them — the chosen brand colour on a real button, the generated icons
- * on a real category strip, the extracted menu as real rows with the real
- * placeholder behind the items that have no photograph. Each answer visibly
- * changes the thing being built, which is the only honest way to show progress.
+ * Two modes, and it says which one it is in.
  *
- * Empty state matters as much as the filled one: before anything is decided it
- * shows a greyed skeleton, so the owner can see what they are working towards.
+ *   Projected  Before assembly there is no project on disk, so there is nothing
+ *              real to read. Everything the conversation has settled — the
+ *              palette, the icons, the catalog — is drawn against the standard
+ *              layout. It is a forecast, and it is labelled as one.
+ *
+ *   Live       After assembly it renders the project's own blocks.json and
+ *              config.xml. A block absent here is absent in the app. This is
+ *              what stops the preview drifting from the thing it previews the
+ *              moment anyone edits a layout.
+ *
+ * Saying which is not a detail. A mock that claims to be live is worse than no
+ * preview at all, because the owner stops checking.
  */
 export function AppPreview({
   facts,
+  appId,
   onClose,
 }: {
   facts: PreviewFacts | null;
+  /** Changes when the app is assembled, which is when a live read starts working. */
+  appId: number | null;
   onClose?: () => void;
 }) {
-  const brand = facts?.palette?.brand ?? "#3d5afe";
-  const onBrand = facts?.palette?.onBrand ?? "#ffffff";
-  const surface = facts?.palette?.surface ?? "#ffffff";
-  const onSurface = facts?.palette?.onSurface ?? "#1a1d23";
-  const border = facts?.palette?.border ?? "#e9edf2";
+  const [live, setLive] = useState<LivePreview | null>(null);
 
-  const categories = facts?.categories ?? [];
-  const totalItems = categories.reduce((n, c) => n + c.total, 0);
-  const placeholder = facts?.placeholderUrl ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const result = await loadPreview();
+      if (!cancelled) setLive(result);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Re-read whenever the app is assembled or the catalog changes underneath.
+  }, [appId, facts?.categories.length, facts?.placeholderUrl]);
 
-  // The items shown in the grid, drawn from across the categories so the
-  // preview looks like a storefront rather than one section of it.
-  const showcase = categories.flatMap((c) =>
-    c.items.map((i) => ({ ...i, category: c.name })),
-  );
+  const tokens = live?.live?.tokens ?? {};
+  const ctx: BlockContext = {
+    // Live tokens win: once the app exists, its own colours.xml is the truth,
+    // and a palette chosen but not yet applied would be a lie about the build.
+    brand: tokens["brand"] ?? facts?.palette?.brand ?? "#3d5afe",
+    onBrand: tokens["on_brand"] ?? facts?.palette?.onBrand ?? "#ffffff",
+    surface: tokens["surface"] ?? facts?.palette?.surface ?? "#ffffff",
+    onSurface: tokens["on_surface"] ?? facts?.palette?.onSurface ?? "#1a1d23",
+    border: tokens["border"] ?? facts?.palette?.border ?? "#e9edf2",
 
-  const currency = facts?.currency ?? "";
+    shopName: live?.live?.strings["app_name"] ?? facts?.name ?? "Your shop",
+    logoUrl: facts?.logoUrl ?? null,
+    currency: facts?.currency ?? "",
+    placeholderUrl: facts?.placeholderUrl ?? null,
+    categories: (facts?.categories ?? []).map((c) => ({
+      name: c.name,
+      iconUrl: c.iconUrl,
+      items: c.items,
+    })),
+  };
+
+  const config: ScreenConfig =
+    live?.live?.screens["product_catalog"] ?? PROJECTED_HOME;
+
+  const totalItems = (facts?.categories ?? []).reduce((n, c) => n + c.total, 0);
+  const isLive = live?.stage === "live";
 
   return (
     <aside className="preview" aria-label="Preview of your app">
       <div className="preview-head">
-        <span className="preview-label">
-          Live preview
-          {facts?.appId && <em>#{facts.appId}</em>}
+        <span className={`preview-label${isLive ? " is-live" : ""}`}>
+          {isLive ? "Live" : "Preview"}
+          {appId && <em>#{appId}</em>}
         </span>
         {totalItems > 0 && (
           <span className="preview-count">
-            {categories.length} sections · {totalItems} items
+            {facts?.categories.length} sections · {totalItems} items
           </span>
         )}
-        {/* Phones only: closing belongs on the sheet, not on a pill floating
-            over the conversation behind it. */}
         {onClose && (
           <button
             type="button"
@@ -63,63 +97,17 @@ export function AppPreview({
         )}
       </div>
 
+      <p className="preview-mode">
+        {isLive
+          ? "Read from your app's own configuration."
+          : "What your app will look like. It goes live once it's built."}
+      </p>
+
       <div className="phone">
         <span className="phone-notch" aria-hidden="true" />
-        <div className="phone-screen" style={{ background: surface, color: onSurface }}>
-          <header className="app-bar" style={{ background: brand, color: onBrand }}>
-            {facts?.logoUrl ? (
-              <img className="app-logo" src={facts.logoUrl} alt="" />
-            ) : (
-              <span className="app-logo app-logo-empty" aria-hidden="true" />
-            )}
-            <span className="app-name">{facts?.name ?? "Your shop"}</span>
-            <span className="app-cart" aria-hidden="true" />
-          </header>
-
-          <div className="app-search" style={{ borderColor: border }}>
-            <span style={{ opacity: 0.45 }}>Search the menu…</span>
-          </div>
-
-          {/* The category strip is where the generated icons actually land. */}
-          <div className="app-cats">
-            {(categories.length > 0
-              ? categories
-              : [{ name: "", iconUrl: null, items: [], total: 0 }, { name: "", iconUrl: null, items: [], total: 0 }, { name: "", iconUrl: null, items: [], total: 0 }]
-            )
-              .slice(0, 8)
-              .map((category, i) => (
-                <span key={i} className={`app-cat${category.name ? "" : " is-skeleton"}`}>
-                  <span className="app-cat-icon" style={{ borderColor: border }}>
-                    {category.iconUrl && <img src={category.iconUrl} alt="" loading="lazy" />}
-                  </span>
-                  <span className="app-cat-name">{category.name}</span>
-                </span>
-              ))}
-          </div>
-
-          <div className="app-grid">
-            {(showcase.length > 0 ? showcase.slice(0, 6) : Array.from({ length: 4 })).map(
-              (item, i) => {
-                const real = item as { name: string; price: number | null; imageUrl: string | null } | undefined;
-                const image = real?.imageUrl ?? placeholder;
-                return (
-                  <span key={i} className={`app-item${real ? "" : " is-skeleton"}`} style={{ borderColor: border }}>
-                    <span className="app-item-img">
-                      {image && <img src={image} alt="" loading="lazy" />}
-                    </span>
-                    <span className="app-item-name">{real?.name ?? ""}</span>
-                    <span className="app-item-price" style={{ color: brand }}>
-                      {real?.price != null ? `${real.price} ${currency}`.trim() : ""}
-                    </span>
-                  </span>
-                );
-              },
-            )}
-          </div>
-
-          <div className="app-cta" style={{ background: brand, color: onBrand }}>
-            Order now
-          </div>
+        <div className="phone-screen">
+          <AppBar config={config} ctx={ctx} />
+          <Screen config={config} ctx={ctx} />
         </div>
       </div>
 
@@ -132,10 +120,42 @@ export function AppPreview({
           value={facts?.palette?.brand ?? null}
           swatch={facts?.palette?.brand ?? null}
         />
+        <Fact
+          label="Features"
+          value={live?.live?.features.length ? String(live.live.features.length) : null}
+        />
       </dl>
     </aside>
   );
 }
+
+/**
+ * The standard layout, as the core ships it.
+ *
+ * Used only before assembly, and only for the blocks a projection can honestly
+ * claim: these are the ones every app gets from the template. It deliberately
+ * does not include anything the features step decides — showing a loyalty card
+ * before anyone has chosen loyalty would be inventing the answer.
+ */
+const PROJECTED_HOME: ScreenConfig = {
+  product_catalog_layout_toolbar_position_toolbar_start: [
+    { block: "product_catalog_block_menu_icon", label: "Menu", placed: true, enabled: true },
+  ],
+  product_catalog_layout_toolbar_position_toolbar_center: [
+    { block: "product_catalog_block_logo", label: "Logo", placed: true, enabled: true },
+    { block: "product_catalog_block_title", label: "Shop name", placed: true, enabled: true },
+  ],
+  product_catalog_layout_toolbar_position_toolbar_end: [
+    { block: "product_catalog_block_search", label: "Search", placed: true, enabled: true },
+  ],
+  product_catalog_layout_content_position_content: [
+    { block: "product_catalog_block_categories", label: "Categories", placed: true, enabled: true },
+    { block: "product_catalog_block_listing_group", label: "Item list", placed: true, enabled: true },
+  ],
+  product_catalog_layout_footer_position_footer_center: [
+    { block: "product_catalog_block_cart", label: "Cart", placed: true, enabled: true },
+  ],
+};
 
 function Fact({
   label,

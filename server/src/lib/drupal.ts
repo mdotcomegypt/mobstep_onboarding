@@ -84,6 +84,70 @@ async function call<T>(
   return parsed as T;
 }
 
+/**
+ * The vocabulary of what an app can contain.
+ *
+ * Derived on the Drupal side from mobstep_android_core itself, so it cannot
+ * describe a block the app could not render. The agent reads `features` and
+ * `presets` and nothing else — it never names a block, because a block placed
+ * somewhere the core does not accept renders nothing and says nothing.
+ */
+export interface Manifest {
+  core_version: string;
+  counts: { screens: number; positions: number; blocks: number; features: number };
+  features: Record<string, ManifestFeature>;
+  presets: Record<string, string[]>;
+  blocks: Record<string, { label: string; screen: string; ios_supported: boolean | null }>;
+}
+
+export interface ManifestFeature {
+  id: string;
+  label: string;
+  blurb: string;
+  core?: boolean;
+  requires?: string[];
+  conflicts?: string[];
+  provides?: string[];
+  needs_config?: boolean;
+  config_endpoint?: string;
+  /** A hint for when to offer it, written for the agent rather than the owner. */
+  suggest_when?: string;
+  auto_when?: string;
+}
+
+/** What the app actually contains right now, read off the project directory. */
+export interface AppPreview {
+  package: string;
+  core_version: string;
+  features: string[];
+  screens: Record<
+    string,
+    Record<
+      string,
+      Array<{ block: string; label: string; placed: boolean; enabled: boolean }>
+    >
+  >;
+  tokens: Record<string, string>;
+  strings: Record<string, string>;
+  catalog: {
+    categories: Array<{ name: string; items: Array<{ name: string; price: number | null }> }>;
+  };
+}
+
+export interface FeatureReport {
+  applied: string[];
+  /** Pulled in as a dependency; the agent says these out loud. */
+  added: string[];
+  /** Skipped because the app is not entitled to the plugin behind them. */
+  blocked: Array<{ feature: string; plugin_code: string; label: string }>;
+  unknown: string[];
+  conflicts: string[][];
+  blocks_placed: number;
+  blocks_removed: number;
+  config_keys_written: number;
+  warnings: Array<{ block: string; label: string; reason: string }>;
+}
+
 export interface Theme {
   id: number;
   package: string;
@@ -95,6 +159,18 @@ export interface Theme {
 
 export const drupal = {
   themes: () => call<{ themes: Theme[] }>("GET", "/api/v3.0/onboarding/themes"),
+
+  manifest: () => call<Manifest>("GET", "/api/v3.0/onboarding/manifest"),
+
+  preview: (appId: number) =>
+    call<AppPreview>("GET", `/api/v3.0/onboarding/app/${appId}/preview`),
+
+  /**
+   * Declarative: the list IS the desired state, so anything omitted is turned
+   * off. Safe to re-send unchanged, which matters because turns get retried.
+   */
+  setFeatures: (appId: number, features: string[]) =>
+    call<FeatureReport>("POST", `/api/v3.0/onboarding/app/${appId}/features`, { features }),
 
   createApp: (input: CreateAppInput) =>
     call<{ application_id: number; package: string }>(
@@ -156,6 +232,42 @@ export const drupal = {
 
   buildStatus: (appId: number, lines = 60) =>
     call<BuildStatus>("GET", `/api/v3.0/onboarding/app/${appId}/build/log?lines=${lines}`),
+
+  /**
+   * A promotional banner. `art_url` is background art only — the name is a
+   * field the app composites over it, so it stays translatable and editable.
+   */
+  createOffer: (
+    appId: number,
+    offer: {
+      name: string;
+      art_url?: string;
+      type?: "item" | "category" | "game" | "coupons";
+      target_id?: number;
+      display_type?: "banner" | "popup" | "highlight";
+      expiry?: string;
+    },
+  ) =>
+    call<{ offer_id: number; display_type: string; features: string[] }>(
+      "POST",
+      `/api/v3.0/onboarding/app/${appId}/offers`,
+      offer,
+    ),
+
+  setLoyalty: (
+    appId: number,
+    loyalty: {
+      type?: "points" | "item_points" | "cashback";
+      points_factor?: number;
+      cashback_factor?: number;
+      expiry_days?: number;
+    },
+  ) =>
+    call<{ loyalty_id: number; type: string; features: string[]; added: string[] }>(
+      "POST",
+      `/api/v3.0/onboarding/app/${appId}/loyalty`,
+      loyalty,
+    ),
 
   setPhone: (uid: number, phone: string) =>
     call<{ uid: number; phone: string }>(

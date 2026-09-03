@@ -1,3 +1,5 @@
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import Fastify from "fastify";
 
 /**
@@ -24,6 +26,8 @@ export interface Recorded {
 
 export interface MockState {
   requests: Recorded[];
+  /** Feature ids currently applied, per app. */
+  features: Map<number, string[]>;
   apps: Map<number, Record<string, unknown>>;
   branches: Map<number, Array<Record<string, unknown>>>;
   catalog: Map<number, Array<Record<string, unknown>>>;
@@ -41,6 +45,7 @@ export async function startDrupalMock(options: {
 }): Promise<{ url: string; state: MockState; stop: () => Promise<void> }> {
   const state: MockState = {
     requests: [],
+    features: new Map(),
     apps: new Map(),
     branches: new Map(),
     catalog: new Map(),
@@ -71,6 +76,145 @@ export async function startDrupalMock(options: {
       body: request.body ?? null,
     });
   });
+
+  /**
+   * The manifest, built from the REAL core block files and the REAL feature
+   * catalog on disk.
+   *
+   * Not a fixture: if a placement in data/onboarding_features.json names a
+   * block the core does not declare, this drops it exactly as BlockManifest
+   * does, and the simulation shows the agent working from a catalog one feature
+   * short. That is the failure worth catching here.
+   *
+   * The resolution itself is only approximated — the real one is PHP and is
+   * verified against a real project copy by its own harness. What this exists
+   * to exercise is the agent: that it names features rather than blocks, reads
+   * the report back to the owner, and never gets stuck.
+   */
+  const manifest = await loadManifest();
+
+  app.get("/api/v3.0/onboarding/manifest", async () => ({
+    status: "ok",
+    ...manifest,
+  }));
+
+  app.get<{ Params: { id: string } }>(
+    "/api/v3.0/onboarding/app/:id/preview",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
+
+      const on = new Set(state.features.get(id) ?? []);
+      const screens: Record<string, Record<string, unknown[]>> = {};
+
+      for (const [featureId, feature] of Object.entries(manifest.features)) {
+        if (!on.has(featureId)) continue;
+        for (const placement of feature.blocks ?? []) {
+          const block = manifest.blocks[placement.block];
+          if (!block) continue;
+          screens[block.screen] ??= {};
+          screens[block.screen][placement.position] ??= [];
+          (screens[block.screen][placement.position] as unknown[]).push({
+            block: placement.block,
+            label: block.label,
+            placed: true,
+            enabled: true,
+            weight: placement.weight ?? 0,
+          });
+        }
+      }
+
+      for (const positions of Object.values(screens)) {
+        for (const list of Object.values(positions)) {
+          (list as Array<{ weight: number }>).sort((a, b) => a.weight - b.weight);
+        }
+      }
+
+      const theme = state.themeKeys.get(id) ?? {};
+      return {
+        status: "ok",
+        package: String(state.apps.get(id)?.["package_name"] ?? ""),
+        core_version: manifest.core_version,
+        features: [...on],
+        screens,
+        tokens: theme,
+        dimens: {},
+        strings: { app_name: String(state.apps.get(id)?.["name"] ?? "") },
+        catalog: { categories: [], sampled_items: 0 },
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/v3.0/onboarding/app/:id/features",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
+
+      const wanted = (request.body as { features?: string[] }).features ?? [];
+      const known = new Set(Object.keys(manifest.features));
+      const unknown = wanted.filter((f) => !known.has(f));
+      const resolved = wanted.filter((f) => known.has(f));
+
+      // requires/provides, transitively — the part the agent's replies depend
+      // on, since `added` is what it reads out loud.
+      const added: string[] = [];
+      for (let i = 0; i < resolved.length; i++) {
+        const feature = manifest.features[resolved[i] as string];
+        for (const need of feature?.requires ?? []) {
+          const satisfied =
+            resolved.includes(need) ||
+            resolved.some((r) => (manifest.features[r]?.provides ?? []).includes(need));
+          if (satisfied) continue;
+
+          const supplier =
+            known.has(need)
+              ? need
+              : Object.entries(manifest.features).find(([, f]) =>
+                  (f.provides ?? []).includes(need),
+                )?.[0];
+          if (supplier && !resolved.includes(supplier)) {
+            resolved.push(supplier);
+            added.push(supplier);
+          }
+        }
+      }
+
+      const conflicts: string[][] = [];
+      for (const featureId of resolved) {
+        for (const other of manifest.features[featureId]?.conflicts ?? []) {
+          if (resolved.includes(other) && !conflicts.some(([a, b]) => a === other && b === featureId)) {
+            conflicts.push([featureId, other]);
+          }
+        }
+      }
+
+      const before = state.features.get(id) ?? [];
+      state.features.set(id, resolved);
+
+      const placed = resolved.reduce(
+        (n, f) => n + (manifest.features[f]?.blocks?.length ?? 0),
+        0,
+      );
+      const removedFeatures = before.filter((f) => !resolved.includes(f));
+
+      return {
+        status: "ok",
+        applied: resolved,
+        added,
+        blocked: [],
+        unknown,
+        conflicts,
+        blocks_placed: placed,
+        blocks_removed: removedFeatures.reduce(
+          (n, f) => n + (manifest.features[f]?.blocks?.length ?? 0),
+          0,
+        ),
+        config_keys_written: placed,
+        warnings: [],
+      };
+    },
+  );
 
   app.get("/api/v3.0/onboarding/themes", async () => ({
     themes: [
@@ -285,4 +429,109 @@ export async function startDrupalMock(options: {
     state,
     stop: () => app.close(),
   };
+}
+
+// -------------------------------------------------------------------------
+
+interface MockPlacement { block: string; position: string; weight?: number }
+interface MockFeature {
+  id: string;
+  label: string;
+  blurb: string;
+  blocks?: MockPlacement[];
+  requires?: string[];
+  provides?: string[];
+  conflicts?: string[];
+  suggest_when?: string;
+}
+interface MockManifest {
+  core_version: string;
+  counts: { screens: number; positions: number; blocks: number; features: number };
+  blocks: Record<string, { label: string; screen: string; ios_supported: boolean | null }>;
+  features: Record<string, MockFeature>;
+  presets: Record<string, string[]>;
+}
+
+/**
+ * Builds the manifest the same way BlockManifest does, from the same two
+ * sources: the core's own *_blocks.json and the curated feature catalog.
+ *
+ * Reading the real files rather than a fixture is the point. A feature whose
+ * placement the core does not accept is dropped here exactly as it would be in
+ * production, so the simulation runs against the catalog as it actually is.
+ */
+async function loadManifest(): Promise<MockManifest> {
+  const core =
+    process.env["SIM_ANDROID_CORE"] ??
+    `${process.env["HOME"]}/Projects/mobstep_android_core/app/src/main/res`;
+  const catalogPath =
+    process.env["SIM_FEATURE_CATALOG"] ??
+    `${process.env["HOME"]}/Projects/mobstep_drupal/modules/custom/apps/data/onboarding_features.json`;
+  const labelsPath = catalogPath.replace("onboarding_features", "onboarding_labels");
+
+  const accepts = new Map<string, Set<string>>();
+  const blocks: MockManifest["blocks"] = {};
+  let positions = 0;
+  let screens = 0;
+
+  const raw = join(core, "raw");
+  for (const file of (await readdir(raw).catch(() => [])) as string[]) {
+    if (!file.endsWith("_blocks.json")) continue;
+    const screen = file.replace("_blocks.json", "");
+    screens += 1;
+    const entries = JSON.parse(await readFile(join(raw, file), "utf8")) as Array<{
+      block: string;
+      position: string;
+    }>;
+    for (const entry of entries) {
+      if (!entry?.block || !entry?.position) continue;
+      if (!accepts.has(entry.position)) {
+        accepts.set(entry.position, new Set());
+        positions += 1;
+      }
+      accepts.get(entry.position)?.add(entry.block);
+      blocks[entry.block] = { label: humanise(entry.block, screen), screen, ios_supported: null };
+    }
+  }
+
+  const labels = JSON.parse(await readFile(labelsPath, "utf8").catch(() => "{}")) as {
+    blocks?: Record<string, string>;
+  };
+  for (const [id, label] of Object.entries(labels.blocks ?? {})) {
+    if (blocks[id]) blocks[id].label = label;
+  }
+
+  const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as {
+    features: Record<string, MockFeature>;
+    presets: Record<string, string[]>;
+  };
+
+  const features: Record<string, MockFeature> = {};
+  for (const [id, feature] of Object.entries(catalog.features)) {
+    const bad = (feature.blocks ?? []).filter(
+      (p) => !blocks[p.block] || !accepts.get(p.position)?.has(p.block),
+    );
+    if (bad.length > 0) {
+      console.error(
+        `  ⚠ mock manifest dropped feature "${id}": ${bad
+          .map((p) => `${p.block} @ ${p.position}`)
+          .join("; ")}`,
+      );
+      continue;
+    }
+    features[id] = { ...feature, id };
+  }
+
+  return {
+    core_version: "sim",
+    counts: { screens, positions, blocks: Object.keys(blocks).length, features: Object.keys(features).length },
+    blocks,
+    features,
+    presets: catalog.presets ?? {},
+  };
+}
+
+function humanise(id: string, screen: string): string {
+  const bare = id.replace(new RegExp(`^${screen}_block_`), "").replace(/_/g, " ");
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
 }

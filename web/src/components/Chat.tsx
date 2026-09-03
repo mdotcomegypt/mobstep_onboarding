@@ -53,6 +53,8 @@ const TOOL_LABELS: Record<string, string> = {
   draw_category_icons: "Drawing section icons",
   draw_item_photos: "Photographing sample items",
   draw_placeholder: "Designing your placeholder",
+  propose_features: "Working out what your app needs",
+  apply_features: "Switching on your features",
   set_branches: "Saving your locations",
   assemble_app: "Assembling your app",
   start_build: "Starting the Android build",
@@ -302,7 +304,11 @@ export function Chat({ session }: { session: SessionView }) {
         {previewOpen ? "Hide preview" : "Preview your app"}
       </button>
 
-      <AppPreview facts={facts} onClose={() => setPreviewOpen(false)} />
+      <AppPreview
+        facts={facts}
+        appId={facts?.appId ?? null}
+        onClose={() => setPreviewOpen(false)}
+      />
     </div>
   );
 }

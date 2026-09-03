@@ -3,6 +3,7 @@ import { z } from "zod";
 import { drupal } from "../lib/drupal.ts";
 import { asUntrusted, fetchSite } from "../lib/site.ts";
 import {
+  generateBanner,
   generateCategoryIcons,
   generateItemPhotos,
   generateLogo,
@@ -40,6 +41,9 @@ export const CARD_TOOLS = new Set([
   "draw_placeholder",
   "draw_logo",
   "scan_menu",
+  "propose_features",
+  "apply_features",
+  "create_offer",
 ]);
 
 const hex = z
@@ -268,10 +272,10 @@ export function buildTools(ctx: ToolContext) {
 
       return (
         `Catalog confirmed: ${cats.length} categories, ${count} items. ` +
-        "Next: dress it. Call draw_category_icons, then draw_placeholder, then " +
-        "draw_item_photos — in that order, without asking permission for each " +
-        "one; announce the set once and let the progress show. After that, ask " +
-        "for their branch address and a phone number."
+        "Next, in this order and without asking permission for each step: " +
+        "draw_category_icons, draw_placeholder, draw_item_photos — announce the " +
+        "set once and let the progress show — then propose_features, then ask " +
+        "for their branch addresses."
       );
     },
     {
@@ -550,7 +554,11 @@ export function buildTools(ctx: ToolContext) {
         card,
         made: photos.length,
         failed: failed.map((f) => f.item),
-        next: "Say these are samples, that every other item falls back to the branded placeholder, and that they can swap any of them later from the dashboard.",
+        next:
+          "Say these are samples, that every other item falls back to the branded " +
+          "placeholder, and that they can swap any of them later. Then call " +
+          "propose_features in the SAME turn — the artwork is done and features " +
+          "are the next step.",
       });
     },
     {
@@ -719,6 +727,15 @@ export function buildTools(ctx: ToolContext) {
         facts.locations.branches = branches;
         facts.phase = "assembly";
       });
+      // More than one branch means the app needs a branch picker. Asking
+      // "would you like customers to choose a branch?" straight after they have
+      // given you two addresses is a question with one sensible answer.
+      if (branches.length > 1) {
+        await mutateFacts(ctx.sessionId, (f) => {
+          if (!f.features.includes("multi_branch")) f.features.push("multi_branch");
+        });
+      }
+
       return (
         `Saved ${branches.length} location(s). ` +
         (branches.length === 1
@@ -739,6 +756,261 @@ export function buildTools(ctx: ToolContext) {
             address: z.string().optional(),
           }),
         ),
+      }),
+    },
+  );
+
+  /**
+   * Features.
+   *
+   * The agent picks from a catalog of ~30 owner-meaningful capabilities. It
+   * never names a block: Mobstep has 143 of them across 68 layout positions,
+   * and a block placed somewhere the core does not accept renders nothing,
+   * logs nothing, and still builds green. The expansion from a feature to the
+   * blocks and config keys it moves happens on the Drupal side, validated
+   * against the core itself.
+   */
+
+  const proposeFeatures = tool(
+    async ({ suggest, because }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const { features, presets } = await drupal.manifest();
+
+      const trade = facts.business.type ?? "";
+      const preset = presets[trade] ?? presets["_default"] ?? [];
+
+      // The preset is the floor; anything the conversation has actually
+      // justified goes on top of it. Asking about the preset would be asking
+      // the owner to confirm what every shop of their kind already needs.
+      const wanted = [...new Set([...preset, ...(suggest ?? [])])].filter(
+        (id) => features[id] !== undefined,
+      );
+
+      const already = new Set(facts.features);
+      const reasons = new Map(Object.entries(because ?? {}));
+
+      const card: Card = {
+        kind: "features",
+        title: already.size > 0 ? "Your app's features" : `What a ${trade || "shop"} app usually needs`,
+        caption:
+          "The basics are already in. Tell me which of the extras you want, or say " +
+          "\u201call of them\u201d.",
+        options: wanted.map((id) => ({
+          id,
+          label: features[id]?.label ?? id,
+          blurb: features[id]?.blurb ?? "",
+          on: already.has(id) || preset.includes(id),
+          ...(reasons.get(id) ? { because: reasons.get(id) as string } : {}),
+        })),
+      };
+
+      // Extras worth mentioning, but only the ones the conversation gives a
+      // reason for. A menu of thirty options is not a conversation.
+      const extras = Object.values(features)
+        .filter((f) => !wanted.includes(f.id) && f.suggest_when)
+        .map((f) => `${f.id} (${f.suggest_when})`);
+
+      return JSON.stringify({
+        card,
+        preset,
+        proposed: wanted,
+        extras_you_could_offer: extras,
+        next:
+          "The list is on screen and everything shown is already ticked. Say in one " +
+          "line what they get by default, then ask about AT MOST TWO extras this " +
+          "conversation actually justifies — a WhatsApp number they gave you, sizes " +
+          "on their menu, a promotion they mentioned. When they answer, call " +
+          "apply_features with the COMPLETE list. Do not move on to locations " +
+          "before apply_features has run.",
+      });
+    },
+    {
+      name: "propose_features",
+      description:
+        "Show the owner the features their app will have, starting from the preset for their trade. Pass `suggest` to add extras the conversation justifies, and `because` to say why. Call this once, after the catalog is confirmed.",
+      schema: z.object({
+        suggest: z
+          .array(z.string())
+          .optional()
+          .describe("Extra feature ids beyond the trade preset"),
+        because: z
+          .record(z.string())
+          .optional()
+          .describe("feature id -> one short reason drawn from what they told you"),
+      }),
+    },
+  );
+
+  const applyFeatures = tool(
+    async ({ features }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const appId = facts.appId ?? ctx.appId;
+      if (!appId) {
+        // Features are written into the project directory, which only exists
+        // once the app does. Recorded now and applied by assemble_app.
+        await mutateFacts(ctx.sessionId, (f) => {
+          f.features = features;
+        });
+        return `Recorded ${features.length} features. They will be applied when the app is assembled.`;
+      }
+
+      const report = await drupal.setFeatures(appId, features);
+      await mutateFacts(ctx.sessionId, (f) => {
+        f.features = report.applied;
+      });
+
+      const manifest = await drupal.manifest();
+      const label = (id: string): string => manifest.features[id]?.label ?? id;
+
+      const card: Card = {
+        kind: "features",
+        title: `${report.applied.length} features on`,
+        options: report.applied.map((id) => ({
+          id,
+          label: label(id),
+          blurb: manifest.features[id]?.blurb ?? "",
+          on: true,
+        })),
+      };
+
+      return JSON.stringify({
+        card,
+        applied: report.applied.map(label),
+        added: report.added.map(label),
+        blocked: report.blocked,
+        conflicts: report.conflicts,
+        warnings: report.warnings,
+        next: [
+          report.added.length > 0
+            ? `Say plainly that you also switched on ${report.added
+                .map(label)
+                .join(" and ")}, and why \u2014 the feature they asked for needs it.`
+            : "",
+          report.blocked.length > 0
+            ? `Tell them ${report.blocked
+                .map((b) => b.label)
+                .join(" and ")} needs an add-on their plan does not include, so it is not switched on.`
+            : "",
+          report.conflicts.length > 0
+            ? "Mention the combination that does not quite fit, in one line, without blocking them."
+            : "",
+          "Then move straight on: ask for their first branch address and a phone number.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      });
+    },
+    {
+      name: "apply_features",
+      description:
+        "Set exactly which features the app has. The list is the whole desired state \u2014 anything left out is switched off \u2014 so always send the full set, not a change. Use feature ids from propose_features.",
+      schema: z.object({
+        features: z.array(z.string()).min(1),
+      }),
+    },
+  );
+
+  /**
+   * Offers and loyalty.
+   *
+   * Both come after the first build. Bolting four more questions onto the front
+   * of onboarding costs every owner time; asking them once they have an app in
+   * their hand costs only the ones who want it.
+   */
+
+  const createOffer = tool(
+    async ({ name, artBrief, expiry }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const appId = facts.appId ?? ctx.appId;
+      if (!appId) throw new Error("The app has not been assembled yet.");
+
+      // Background art only. Text set inside a generated image comes back
+      // mangled in Arabic, cannot be translated, and cannot be edited later
+      // without regenerating the whole thing — so the words stay a field the
+      // app draws over the art.
+      let artUrl: string | undefined;
+      if (artBrief) {
+        report({ label: "Painting the banner background" });
+        const art = await generateBanner(
+          ctx.sessionId,
+          artBrief,
+          facts.brand.palette,
+          facts.business.type ?? "",
+        );
+        if (art) artUrl = art.url;
+      }
+
+      const created = await drupal.createOffer(appId, {
+        name,
+        ...(artUrl ? { art_url: artUrl } : {}),
+        ...(expiry ? { expiry } : {}),
+        display_type: "banner",
+      });
+
+      const card: Card = artUrl
+        ? {
+            kind: "gallery",
+            title: name,
+            caption: "Your banner. The wording sits on top, so you can change it any time.",
+            images: [{ url: artUrl, label: "Banner", shape: "tile" }],
+          }
+        : { kind: "text", text: `Offer "${name}" is live.` };
+
+      return JSON.stringify({
+        card,
+        offerId: created.offer_id,
+        next: "Say it is live on the home screen and that they can edit or end it from the dashboard.",
+      });
+    },
+    {
+      name: "create_offer",
+      description:
+        "Put a promotional banner on the home screen. `name` is the wording customers read — the app draws it over the art, so never ask for it to be part of the picture. Pass `artBrief` to have the background painted. Only after the app is built.",
+      schema: z.object({
+        name: z.string().describe("The offer as the customer reads it, in their language"),
+        artBrief: z
+          .string()
+          .optional()
+          .describe("What the background should show, e.g. 'fried chicken on a dark table'"),
+        expiry: z.string().optional().describe("ISO date the offer ends"),
+      }),
+    },
+  );
+
+  const setupLoyalty = tool(
+    async ({ type, pointsPerUnit, cashbackFraction, expiryDays }) => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const appId = facts.appId ?? ctx.appId;
+      if (!appId) throw new Error("The app has not been assembled yet.");
+
+      const result = await drupal.setLoyalty(appId, {
+        type: type ?? "points",
+        ...(pointsPerUnit === undefined ? {} : { points_factor: pointsPerUnit }),
+        ...(cashbackFraction === undefined ? {} : { cashback_factor: cashbackFraction }),
+        ...(expiryDays === undefined ? {} : { expiry_days: expiryDays }),
+      });
+
+      await mutateFacts(ctx.sessionId, (f) => {
+        f.features = result.features;
+      });
+
+      return (
+        `Loyalty is on (${result.type}). ` +
+        (result.added.length > 0
+          ? `It also switched on ${result.added.join(", ")}, because points need an account to sit in — say so. `
+          : "") +
+        "Tell them what a customer earns in their own currency, in one line."
+      );
+    },
+    {
+      name: "setup_loyalty",
+      description:
+        "Turn on loyalty points and set the earn rate. `pointsPerUnit` is points earned per unit of currency spent; use `cashbackFraction` (e.g. 0.05 for 5%) only for cash back. Only after the app is built.",
+      schema: z.object({
+        type: z.enum(["points", "item_points", "cashback"]).optional(),
+        pointsPerUnit: z.number().positive().optional(),
+        cashbackFraction: z.number().positive().max(0.5).optional(),
+        expiryDays: z.number().int().positive().optional(),
       }),
     },
   );
@@ -825,7 +1097,25 @@ export function buildTools(ctx: ToolContext) {
         }
       }
 
-      // Branches first, then the catalog against them. Drupal attaches every
+      // Features before content. They decide which blocks exist on each screen,
+      // and a catalog written into a screen whose list block is switched off is
+      // invisible — with nothing anywhere reporting it.
+      if (facts.features.length > 0) {
+        report({ label: "Switching on the features you chose" });
+        try {
+          const applied = await drupal.setFeatures(appId, facts.features);
+          await mutateFacts(ctx.sessionId, (f) => {
+            f.features = applied.applied;
+          });
+        } catch (error) {
+          // Non-fatal: an app with template defaults is still a working app,
+          // and losing the whole assembly over a feature set the owner can
+          // change from the dashboard is the wrong trade.
+          console.error("feature apply failed", error);
+        }
+      }
+
+      // Branches next, then the catalog against them. Drupal attaches every
       // category to the branch ids it is handed, so a catalog created before
       // the branches exist belongs to nothing and shows up in no branch's menu.
       report({ label: "Creating your branches" });
@@ -956,6 +1246,10 @@ export function buildTools(ctx: ToolContext) {
     drawPlaceholder,
     drawLogo,
     setBranches,
+    proposeFeatures,
+    applyFeatures,
+    createOffer,
+    setupLoyalty,
     assembleApp,
     startBuild,
     checkBuild,

@@ -85,6 +85,15 @@ export interface OnboardingFacts {
     suggestions: Palette[];
   };
   artwork: Artwork;
+  /**
+   * Feature ids the owner has settled on.
+   *
+   * Names from the Drupal manifest's catalog — never block ids. The expansion
+   * from a feature to the blocks and config keys it moves happens server-side,
+   * because a block placed where the core does not accept it renders nothing
+   * and logs nothing.
+   */
+  features: string[];
   catalog: CatalogDraft;
   locations: { branches: BranchDraft[] };
   appId?: number;
@@ -98,6 +107,7 @@ export const emptyFacts = (): OnboardingFacts => ({
   business: {},
   brand: { suggestions: [] },
   artwork: { logoOptions: [] },
+  features: [],
   catalog: { categories: [] },
   locations: { branches: [] },
   phase: "discovery",
@@ -125,6 +135,21 @@ export type Card =
         name: string;
         iconUrl?: string;
         items: Array<{ name: string; price?: number; imageUrl?: string }>;
+      }>;
+    }
+  | {
+      /** Features proposed or applied, each with why it is being suggested. */
+      kind: "features";
+      title: string;
+      caption?: string;
+      options: Array<{
+        id: string;
+        label: string;
+        blurb: string;
+        /** Already on, so the card shows it as kept rather than offered. */
+        on: boolean;
+        /** Why this one, in the owner's terms. */
+        because?: string;
       }>;
     }
   | {
