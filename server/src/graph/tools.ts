@@ -228,16 +228,18 @@ export function buildTools(ctx: ToolContext) {
 
       // Check it against the real templates before writing it down.
       //
-      // This is a foreign key into Drupal, and nothing downstream re-checks it:
+      // This is a foreign key into Drupal and nothing downstream re-checks it:
       // assemble_app passes it straight to createApp, which answers an id that
       // is not a published template with `Theme N is not a template.` — a 400
       // that lands ten minutes later, after the menu has been read and the
       // artwork drawn, and takes the whole assembly with it.
       //
-      // The agent is told to prefer the standard layout without calling
-      // show_themes, so when it does pass an id it usually has no real one in
-      // context and the number is invented. Catching that here costs one cheap
-      // call and turns a lost assembly into a corrected sentence.
+      // Written after a production failure that mentioned the theme, which
+      // turned out to have a different cause: the /theme route was unreachable
+      // because of a broken parameter requirement. The validation is kept
+      // anyway. The agent is told to prefer the standard layout without calling
+      // show_themes, so any id it does pass has no source in context, and one
+      // cheap call here is worth more than a foreign key nobody verifies.
       const { themes } = await drupal.themes();
       const match = themes.find((t) => t.id === themeId);
 
