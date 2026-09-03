@@ -9,7 +9,8 @@
     "migrate": "node --env-file-if-exists=../.env --experimental-strip-types src/db/migrate.ts",
     "preflight": "node --env-file-if-exists=../.env --experimental-strip-types src/preflight.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "sim": "node --experimental-strip-types sim/run.ts"
+    "sim": "node --experimental-strip-types sim/run.ts",
+    "sim:recovery": "node --experimental-strip-types sim/recovery.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

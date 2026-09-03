@@ -246,7 +246,26 @@
         </div>
       </article>
 
-      <p class="proof-note"><b>6 · Live activity.</b> What replaces a spinner. An icon batch runs for two minutes; an indeterminate spinner held that long is indistinguishable from a hang, and owners reload.</p>
+      <p class="proof-note"><b>6 · Waiting on the model.</b> The ten to thirty seconds before the first tool starts. This used to be blank — an empty bubble and "Working on it" in the composer, which after saying yes to building an app reads as nothing happening.</p>
+
+      <article class="turn turn-user">
+        <div class="turn-body"><div class="bubble">yes</div></div>
+      </article>
+
+      <article class="turn turn-assistant">
+        <span class="avatar is-live"><i></i></span>
+        <div class="turn-body">
+          <div class="activity" role="status">
+            <div class="activity-head">
+              <span class="scanner"></span>
+              <strong>Thinking this through</strong>
+            </div>
+            <div class="activity-bar is-indeterminate"><i></i></div>
+          </div>
+        </div>
+      </article>
+
+      <p class="proof-note"><b>7 · Live activity.</b> What replaces a spinner. An icon batch runs for two minutes; an indeterminate spinner held that long is indistinguishable from a hang, and owners reload.</p>
 
       <article class="turn turn-assistant">
         <span class="avatar is-live"><i></i></span>
@@ -263,7 +282,7 @@
         </div>
       </article>
 
-      <p class="proof-note"><b>7 · Retry, error, and the build.</b> A transient provider failure is announced and retried inside the open stream rather than dropped on the owner.</p>
+      <p class="proof-note"><b>8 · Retry, error, and the build.</b> A transient provider failure is announced and retried inside the open stream rather than dropped on the owner.</p>
 
       <div class="retry-bar"><span class="pulse"></span>Still busy on our side. Giving it another go.<em>attempt 2 of 4</em></div>
 
@@ -279,6 +298,33 @@
 BUILD SUCCESSFUL in 1m 47s</pre>
           </div>
           <a class="card-block link-card" href="#">Download your app ↗</a>
+        </div>
+      </article>
+
+      <p class="proof-note"><b>9 · Assembly, both ways.</b> The moment the app stops being a conversation and starts existing — and the moment it doesn't. A failure names its step and carries the real message, instead of arriving as "there was an issue with the theme, I'll try to fix it".</p>
+
+      <article class="turn turn-assistant">
+        <span class="avatar"><i></i></span>
+        <div class="turn-body">
+          <div class="card-block build-card is-success">
+            <p class="card-title"><span class="chip chip-success">Done</span>Rosto Fried Chicken is in Mobstep</p>
+            <pre class="log">app        #9000  (rosto_fried_chicken)
+locations  2
+categories 6  (6 with icons)
+items      96  (4 photographed, the rest on your placeholder)
+features   12</pre>
+          </div>
+        </div>
+      </article>
+
+      <article class="turn turn-assistant">
+        <span class="avatar"><i></i></span>
+        <div class="turn-body">
+          <div class="card-block build-card is-failed">
+            <p class="card-title"><span class="chip chip-failed">Failed</span>Could not create the app</p>
+            <pre class="log">POST /api/v3.0/onboarding/app failed: Theme 9999 is not a template.</pre>
+          </div>
+          <div class="bubble">The layout I picked isn't available any more, so the app wasn't created. Nothing is lost — your menu, colours and branches are all still here. Shall I try again with the standard layout?</div>
         </div>
       </article>
 

@@ -12,6 +12,7 @@ import {
 } from "../lib/imagery.ts";
 import { scanMenu } from "../lib/menu.ts";
 import { report } from "../lib/progress.ts";
+import { trace } from "../lib/trace.ts";
 import { mutateFacts } from "./facts.ts";
 import type { Card, Palette } from "./state.ts";
 import { slugify } from "../lib/slug.ts";
@@ -44,6 +45,7 @@ export const CARD_TOOLS = new Set([
   "propose_features",
   "apply_features",
   "create_offer",
+  "assemble_app",
 ]);
 
 const hex = z
@@ -216,17 +218,49 @@ export function buildTools(ctx: ToolContext) {
 
   const chooseTheme = tool(
     async ({ themeId }) => {
+      if (themeId === undefined) {
+        await mutateFacts(ctx.sessionId, (facts) => {
+          facts.themeId = null;
+        });
+        return "Standard Mobstep layout recorded. Next: move on to branding — propose_palette with two or three colour schemes.";
+      }
+
+      // Check it against the real templates before writing it down.
+      //
+      // This is a foreign key into Drupal, and nothing downstream re-checks it:
+      // assemble_app passes it straight to createApp, which answers an id that
+      // is not a published template with `Theme N is not a template.` — a 400
+      // that lands ten minutes later, after the menu has been read and the
+      // artwork drawn, and takes the whole assembly with it.
+      //
+      // The agent is told to prefer the standard layout without calling
+      // show_themes, so when it does pass an id it usually has no real one in
+      // context and the number is invented. Catching that here costs one cheap
+      // call and turns a lost assembly into a corrected sentence.
+      const { themes } = await drupal.themes();
+      const match = themes.find((t) => t.id === themeId);
+
+      if (!match) {
+        await mutateFacts(ctx.sessionId, (facts) => {
+          facts.themeId = null;
+        });
+        return (
+          `There is no layout #${themeId}. Nothing was recorded, so the app will ` +
+          `use the standard Mobstep layout — which is a fine outcome; say so in ` +
+          `passing and move on. Only call show_themes if the owner asks to see ` +
+          `the alternatives, and only pass an id that came back from it.`
+        );
+      }
+
       await mutateFacts(ctx.sessionId, (facts) => {
-        facts.themeId = themeId ?? null;
+        facts.themeId = themeId;
       });
-      return themeId
-        ? `Layout #${themeId} recorded. Next: move on to branding — propose_palette with two or three colour schemes drawn from their existing brand.`
-        : "Standard Mobstep layout recorded. Next: move on to branding — propose_palette with two or three colour schemes.";
+      return `Layout "${match.name}" (#${themeId}) recorded. Next: move on to branding — propose_palette with two or three colour schemes drawn from their existing brand.`;
     },
     {
       name: "choose_theme",
       description:
-        "Record the layout the owner picked. Pass the template id, or omit themeId if they want the standard layout.",
+        "Record the layout the owner picked. Omit themeId for the standard Mobstep layout, which is the usual answer. Only pass an id that show_themes actually returned — an invented one is rejected.",
       schema: z.object({ themeId: z.number().optional() }),
     },
   );
@@ -1031,6 +1065,7 @@ export function buildTools(ctx: ToolContext) {
 
   const assembleApp = tool(
     async ({ packageName, plan }) => {
+     try {
       const current = await mutateFacts(ctx.sessionId, (f) => {
         f.phase = "assembly";
       });
@@ -1056,8 +1091,7 @@ export function buildTools(ctx: ToolContext) {
       const business = facts.business;
       if (!business.name) throw new Error("The business name is not set yet.");
 
-      report({ label: `Creating "${business.name}" in Mobstep` });
-      const created = await drupal.createApp({
+      const base = {
         uid: ctx.uid,
         name: business.name,
         package_name: slug,
@@ -1065,10 +1099,42 @@ export function buildTools(ctx: ToolContext) {
         business_type: business.type ?? "general",
         language: business.languages?.[0] ?? "en",
         currency: business.currency ?? "USD",
-        // Omitted when null: the app then keeps the mobstep_android_core
-        // defaults that create_new_project.sh laid down.
-        ...(facts.themeId ? { theme: facts.themeId } : {}),
-      });
+      };
+
+      report({ label: `Creating "${business.name}" in Mobstep` });
+
+      // The app itself is the one step that must not be lost to something
+      // cosmetic. A template that is not published, or was deleted since it was
+      // chosen, answers `Theme N is not a template.` — and until now that 400
+      // took the entire assembly with it, after the owner had spent ten minutes
+      // on the menu. The layout is decoration; the app is the thing they came
+      // for. So a theme failure retries without it and says so.
+      let created: { application_id: number; package: string };
+      const notes: string[] = [];
+
+      try {
+        created = await drupal.createApp({
+          ...base,
+          // Omitted when null: the app then keeps the mobstep_android_core
+          // defaults that create_new_project.sh laid down.
+          ...(facts.themeId ? { theme: facts.themeId } : {}),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (facts.themeId && /theme/i.test(message)) {
+          trace("assemble.theme_rejected", { themeId: facts.themeId, message: message.slice(0, 200) });
+          await mutateFacts(ctx.sessionId, (f) => {
+            f.themeId = null;
+          });
+          report({ label: "That layout is unavailable — using the standard one" });
+          created = await drupal.createApp(base);
+          notes.push(
+            "The layout they picked was not available, so the app uses the standard Mobstep one. Mention it in passing.",
+          );
+        } else {
+          throw error;
+        }
+      }
 
       const appId = created.application_id;
       await mutateFacts(ctx.sessionId, (f) => {
@@ -1122,10 +1188,15 @@ export function buildTools(ctx: ToolContext) {
             f.features = applied.applied;
           });
         } catch (error) {
-          // Non-fatal: an app with template defaults is still a working app,
-          // and losing the whole assembly over a feature set the owner can
-          // change from the dashboard is the wrong trade.
-          console.error("feature apply failed", error);
+          // Non-fatal — an app with template defaults is still a working app —
+          // but not silent. Swallowing this left the owner told their features
+          // were on when they were not, which is worse than the failure.
+          const message = error instanceof Error ? error.message : String(error);
+          trace("assemble.features_failed", { appId, message: message.slice(0, 200) });
+          notes.push(
+            "The features could not be switched on, so the app has the template's " +
+              "defaults. Say so plainly and tell them it can be changed from the dashboard.",
+          );
         }
       }
 
@@ -1171,13 +1242,62 @@ export function buildTools(ctx: ToolContext) {
         ),
       ];
 
-      return (
-        `App #${appId} assembled as package "${created.package}": ` +
-        `${branchIds.length} location(s), ` +
-        `${facts.catalog.categories.length} categories with ${artwork[0]} icons, ` +
-        `${facts.catalog.categories.reduce((n, c) => n + c.items.length, 0)} items ` +
-        `(${artwork[1]} photographed, the rest on the placeholder).`
-      );
+      const items = facts.catalog.categories.reduce((n, c) => n + c.items.length, 0);
+
+      // A card, not just prose. Assembly is the moment the app stops being a
+      // conversation and starts existing, and "it's assembled" in a sentence is
+      // indistinguishable from the same sentence when nothing happened.
+      const card: Card = {
+        kind: "progress",
+        label: `${business.name} is in Mobstep`,
+        status: "success",
+        log: [
+          `app        #${appId}  (${created.package})`,
+          `locations  ${branchIds.length}`,
+          `categories ${facts.catalog.categories.length}  (${artwork[0]} with icons)`,
+          `items      ${items}  (${artwork[1]} photographed, the rest on your placeholder)`,
+          `features   ${facts.features.length}`,
+        ].join("\n"),
+      };
+
+      return JSON.stringify({
+        card,
+        appId,
+        package: created.package,
+        notes,
+        next:
+          (notes.length > 0 ? notes.join(" ") + " " : "") +
+          "Then say the app exists and ask whether to build it. Do not repeat the numbers — the card has them.",
+      });
+     } catch (error) {
+      // A failed assembly used to reach the owner only as whatever the model
+      // chose to say about it — in production, "there was an issue with the
+      // theme. I'll try to fix it and re-assemble", a paraphrase that named no
+      // step and promised a retry that never came.
+      //
+      // So the failure gets a card of its own carrying the real message, and
+      // the model is told plainly not to promise anything it is not doing.
+      const message = error instanceof Error ? error.message : String(error);
+      trace("assemble.failed", { message: message.slice(0, 400) }, { sessionId: ctx.sessionId });
+
+      const card: Card = {
+        kind: "progress",
+        label: "Could not create the app",
+        status: "failed",
+        log: message.replace(/\s+/g, " ").slice(0, 500),
+      };
+
+      return JSON.stringify({
+        card,
+        failed: true,
+        next:
+          "The failure is on screen with its real message. Say in one line what " +
+          "did not work, in their terms. Nothing was lost — everything collected " +
+          "is still saved. Ask whether to try again, and WAIT for them to answer. " +
+          "Do NOT say you will retry, fix it, or look into it: you have no way to " +
+          "do anything after this turn ends, and promising it strands them.",
+      });
+     }
     },
     {
       name: "assemble_app",

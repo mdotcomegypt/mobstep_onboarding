@@ -10,6 +10,7 @@
     "typecheck": "pnpm -r exec tsc --noEmit",
     "preflight": "pnpm --filter ./server preflight",
     "release": "pnpm install --frozen-lockfile && pnpm build && pnpm migrate",
-    "sim": "pnpm --filter ./server sim"
+    "sim": "pnpm --filter ./server sim",
+    "sim:recovery": "pnpm --filter ./server sim:recovery"
   }
 }

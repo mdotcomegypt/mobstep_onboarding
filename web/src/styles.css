@@ -611,6 +611,7 @@ th { color: var(--ink-faint); font-weight: 600; font-size: 11px; text-transform:
 .chip-success { background: rgba(61, 220, 151, .12); color: var(--ok); }
 .chip-failed  { background: rgba(255, 107, 107, .12); color: var(--danger); }
 .build-card.is-success { border-color: rgba(61, 220, 151, .3); }
+.build-card.is-failed { border-color: rgba(255, 107, 107, .3); }
 .log {
   margin: 10px 0 0; padding: 10px;
   background: var(--void); border: 1px solid var(--line-soft); border-radius: var(--r-sm);

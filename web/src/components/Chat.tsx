@@ -100,7 +100,20 @@ export function Chat({ session }: { session: SessionView }) {
     setBusy(true);
     setError(null);
     setRetry(null);
-    setActivity(null);
+
+    // Show something IMMEDIATELY.
+    //
+    // The model call before the first tool takes ten to thirty seconds, and
+    // longer when it retries. Until now `activity` was only set by onTool, so
+    // for that whole stretch the transcript showed an empty bubble and the
+    // composer said "Working on it" — which, after the owner has just said yes
+    // to building their app, reads exactly like nothing happened.
+    setActivity({
+      tool: "",
+      status: {
+        label: attachments.length > 0 ? "Reading what you sent" : "Thinking this through",
+      },
+    });
 
     const isOpening = message === "" && attachments.length === 0;
     setTurns((prev) => [
@@ -152,13 +165,17 @@ export function Chat({ session }: { session: SessionView }) {
             return { ...t, steps };
           });
         },
-        onToolDone: (name) =>
+        onToolDone: (name) => {
+          // Back to a generic waiting state rather than a stale tool name: the
+          // model is now composing its reply, which is a real thing to say.
+          setActivity({ tool: "", status: { label: "Writing back" } });
           patchLast((t) => ({
             ...t,
             steps: (t.steps ?? []).map((s) =>
               s.name === name && !s.done ? { ...s, done: true } : s,
             ),
-          })),
+          }));
+        },
         onRetry: (info) => setRetry(info),
         onDone: (info) => {
           setActivity(null);
@@ -385,7 +402,8 @@ function StepList({ steps }: { steps: Step[] }) {
  */
 function LiveActivity({ activity }: { activity: { tool: string; status: Status | null } }) {
   const { tool, status } = activity;
-  const headline = TOOL_LABELS[tool] ?? "Working";
+  // No tool yet means the model itself is working — which is most of the wait.
+  const headline = TOOL_LABELS[tool] ?? status?.label ?? "Working";
   const detail = status?.label ?? null;
   const fraction =
     status?.total && status.total > 1 ? (status.step ?? 0) / status.total : undefined;

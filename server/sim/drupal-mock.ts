@@ -259,6 +259,16 @@ export async function startDrupalMock(options: {
       return reply.code(400).send({ error: "name and uid are required" });
     }
 
+    // Drupal answers an id that is not a published template with exactly this,
+    // and it does so AFTER creating the application entity. Reproduced because
+    // it is a failure the agent has actually hit in production: the id was
+    // invented, the 400 arrived ten minutes into the conversation, and it took
+    // the whole assembly with it.
+    const theme = body["theme"];
+    if (theme !== undefined && ![41, 42, 43].includes(Number(theme))) {
+      return reply.code(400).send({ error: `Theme ${String(theme)} is not a template.` });
+    }
+
     const id = nextAppId++;
     state.apps.set(id, body);
     return { application_id: id, package: pkg };
