@@ -225,6 +225,24 @@ try {
     );
   }
 
+  console.log("\n7 · Drupal answers with an HTML error page");
+  {
+    const sessionId = await freshSession();
+    const facts = await loadFacts(sessionId);
+    facts.appId = 8888;
+    await saveFacts(sessionId, facts);
+
+    const tools = buildTools({ sessionId, uid: UID, appId: 8888 });
+    const result = parse(await call(tools, "start_build", {}));
+    const log = String((result["card"] as { log?: string } | undefined)?.log ?? "");
+
+    check("reports rather than throws", result["failed"] === true);
+    check("says it was an HTML page", /HTML page instead of JSON/i.test(log));
+    check("names it a server-side fault", /server-side fault/i.test(log));
+    check("does not dump the doctype at the owner", !/DOCTYPE/i.test(log));
+    check("keeps the page title as a clue", /Error \| Mobstep/i.test(log), log.slice(0, 120));
+  }
+
   console.log(
     failures === 0
       ? "\nall recovery paths hold\n"

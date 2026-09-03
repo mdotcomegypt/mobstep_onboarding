@@ -73,7 +73,25 @@ async function call<T>(
   try {
     parsed = text ? JSON.parse(text) : {};
   } catch {
-    throw new DrupalError(`Non-JSON response from ${path}: ${text.slice(0, 200)}`, response.status);
+    // An HTML body means Drupal's page pipeline answered instead of the
+    // controller — a PHP fatal that escaped the endpoint's own handler, or a
+    // route that did not match. Dumping the first 200 characters of a Drupal
+    // error page tells nobody anything: it is a doctype and a Google Tag
+    // Manager snippet. Say what it actually means and where the cause is.
+    if (/^\s*<(!doctype|html)/i.test(text)) {
+      const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text)?.[1]?.trim();
+      throw new DrupalError(
+        `${path} returned an HTML page instead of JSON` +
+          (title ? ` ("${title.slice(0, 80)}")` : "") +
+          `. That is a server-side fault in the endpoint, not a bad request — ` +
+          `the detail is in the Drupal log.`,
+        response.status,
+      );
+    }
+    throw new DrupalError(
+      `Non-JSON response from ${path}: ${text.replace(/\s+/g, " ").slice(0, 200)}`,
+      response.status,
+    );
   }
 
   if (!response.ok) {

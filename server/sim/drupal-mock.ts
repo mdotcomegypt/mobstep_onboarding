@@ -387,6 +387,21 @@ export async function startDrupalMock(options: {
     "/api/v3.0/onboarding/app/:id/build",
     async (request, reply) => {
       const id = Number(request.params.id);
+
+      // App 8888 answers with a Drupal error PAGE rather than JSON — the shape
+      // production actually produced, where a PHP Error escaped the endpoint's
+      // \Exception-only handler and the site's page pipeline replied instead.
+      if (id === 8888) {
+        return reply
+          .code(500)
+          .type("text/html")
+          .send(
+            '<!DOCTYPE html>\n<html lang="en" dir="ltr">\n<head>\n<meta charset="utf-8" />\n' +
+              '<script async src="https://www.googletagmanager.com/gtag/js?id=G-GBJVZKTF13"></script>\n' +
+              "<title>Error | Mobstep</title>\n</head>\n<body>The website encountered an unexpected error.</body></html>",
+          );
+      }
+
       if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
       const mode = (request.body as { mode?: string }).mode ?? "debug";
       state.builds.set(id, { startedAt: Date.now(), mode });
