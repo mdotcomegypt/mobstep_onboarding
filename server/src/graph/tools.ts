@@ -36,7 +36,6 @@ export const CARD_TOOLS = new Set([
   "propose_palette",
   "review_catalog",
   "show_logo_options",
-  "start_build",
   "draw_category_icons",
   "draw_item_photos",
   "draw_placeholder",
@@ -46,6 +45,8 @@ export const CARD_TOOLS = new Set([
   "apply_features",
   "create_offer",
   "assemble_app",
+  "start_build",
+  "check_build",
 ]);
 
 const hex = z
@@ -1317,17 +1318,54 @@ export function buildTools(ctx: ToolContext) {
     },
   );
 
+  /**
+   * The build.
+   *
+   * Both of these used to let a failure reach the owner only as whatever the
+   * model chose to say about it. In production that was "I'm still encountering
+   * an issue when trying to start the build. I'm looking into it." — a sentence
+   * that names nothing, and promises work that cannot happen: the turn ends
+   * when the model stops writing.
+   */
+
   const startBuild = tool(
     async () => {
       const facts = await mutateFacts(ctx.sessionId, (f) => {
         f.phase = "build";
       });
       const appId = facts.appId ?? ctx.appId;
-      if (!appId) throw new Error("The app has not been assembled yet.");
 
-      await drupal.build(appId, "debug");
-      const card: Card = { kind: "progress", label: "Building your Android app", status: "running" };
-      return JSON.stringify({ card, note: "Build started. Poll check_build for progress." });
+      // A missing app id here means assembly never finished, however confident
+      // the conversation sounded about it. Saying so is worth more than a
+      // failed build call that reports the same thing less clearly.
+      if (!appId) {
+        return JSON.stringify({
+          failed: true,
+          next:
+            "The app has not been created in Mobstep yet, so there is nothing to " +
+            "build. Say that plainly, and ask whether to assemble it now. Do NOT " +
+            "say you will look into it.",
+        });
+      }
+
+      try {
+        await drupal.build(appId, "debug");
+      } catch (error) {
+        return buildFailure("Could not start the build", error, ctx.sessionId, appId);
+      }
+
+      const card: Card = {
+        kind: "progress",
+        label: "Building your Android app",
+        status: "running",
+      };
+      return JSON.stringify({
+        card,
+        next:
+          "Say it has started and that it takes a few minutes. Then call " +
+          "check_build in your NEXT turn — do not promise to check later, just " +
+          "check.",
+      });
     },
     {
       name: "start_build",
@@ -1340,24 +1378,72 @@ export function buildTools(ctx: ToolContext) {
     async () => {
       const facts = await mutateFacts(ctx.sessionId, () => {});
       const appId = facts.appId ?? ctx.appId;
-      if (!appId) throw new Error("The app has not been assembled yet.");
+      if (!appId) {
+        return JSON.stringify({
+          failed: true,
+          next: "The app was never created, so no build exists. Offer to assemble it.",
+        });
+      }
 
-      const status = await drupal.buildStatus(appId, 20);
+      let status;
+      try {
+        status = await drupal.buildStatus(appId, 20);
+      } catch (error) {
+        return buildFailure("Could not read the build log", error, ctx.sessionId, appId);
+      }
+
       if (status.status === "success") {
         await mutateFacts(ctx.sessionId, (f) => {
           f.phase = "done";
         });
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Your app is built",
+            status: "success",
+            log: status.log.split("\n").slice(-8).join("\n"),
+          } satisfies Card,
+          artifact: status.artifact,
+          next: "Give them the download link and say they can install it on any Android phone.",
+        });
       }
+
+      if (status.status === "failed") {
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "The build failed",
+            status: "failed",
+            log: status.log.split("\n").slice(-14).join("\n"),
+          } satisfies Card,
+          next:
+            "The log is on screen. Say in one line that the build did not succeed " +
+            "and that the team has been sent the log. Everything they set up is " +
+            "saved. Do NOT read the log aloud, and do NOT promise to fix it.",
+        });
+      }
+
+      // `pending` means Drupal has no log file at all. A build that never
+      // started looks exactly like one queued a second ago, and polling it
+      // forever is how a conversation dies quietly.
+      const pending = status.status === "pending";
       return JSON.stringify({
         status: status.status,
         artifact: status.artifact,
         tail: status.log.split("\n").slice(-8).join("\n"),
+        next: pending
+          ? "Nothing has been written to the build log yet. Wait for the owner to " +
+            "say something before checking again — and if it is still empty on the " +
+            "second look, tell them it has not started and that the team will pick " +
+            "it up, rather than checking a third time."
+          : "Still running. Tell them where it is up to in one line and ask them to " +
+            "hold on; check again when they reply.",
       });
     },
     {
       name: "check_build",
       description:
-        "Check the Android build. Returns running, success or failed, plus the tail of the log.",
+        "Check the Android build. Returns pending, running, success or failed, plus the tail of the log.",
       schema: z.object({}),
     },
   );
@@ -1388,4 +1474,38 @@ export function buildTools(ctx: ToolContext) {
     startBuild,
     checkBuild,
   ];
+}
+
+/**
+ * A build failure the owner can actually see.
+ *
+ * The real message goes on a card rather than into the model's paraphrase, and
+ * the model is told plainly not to promise a follow-up it has no way to make.
+ */
+function buildFailure(
+  label: string,
+  error: unknown,
+  sessionId: number,
+  appId: number,
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  trace("build.failed", { appId, label, message: message.slice(0, 400) }, { sessionId });
+
+  const card: Card = {
+    kind: "progress",
+    label,
+    status: "failed",
+    log: message.replace(/\s+/g, " ").slice(0, 500),
+  };
+
+  return JSON.stringify({
+    card,
+    failed: true,
+    next:
+      "The failure is on screen with its real message. Say in one line what did " +
+      "not work, in their terms. Everything they set up is saved. Ask whether to " +
+      "try again and WAIT for their answer. Do NOT say you are looking into it, " +
+      "investigating, or fixing it — nothing runs after your turn ends, and that " +
+      "promise leaves them waiting for something that will never come.",
+  });
 }

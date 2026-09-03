@@ -167,6 +167,64 @@ try {
     );
   }
 
+  console.log("\n4 · start_build before the app exists");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    const result = parse(await call(tools, "start_build", {}));
+
+    check("does not throw an opaque error", result["failed"] === true);
+    check(
+      "says there is nothing to build",
+      /not been created in Mobstep/i.test(String(result["next"] ?? "")),
+    );
+    check(
+      "forbids 'looking into it'",
+      /Do NOT say you will look into it/i.test(String(result["next"] ?? "")),
+    );
+  }
+
+  console.log("\n5 · the build endpoint rejects the call");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    await call(tools, "assemble_app", {});
+
+    // Drupal refuses a build it cannot start — a missing project directory, a
+    // script that is not executable. The mock answers 422 for app 9999 so the
+    // agent's side of that exchange can be exercised without one.
+    const broken = buildTools({ sessionId, uid: UID, appId: 9999 });
+    const facts = await loadFacts(sessionId);
+    facts.appId = 9999;
+    await saveFacts(sessionId, facts);
+
+    const result = parse(await call(broken, "start_build", {}));
+    const card = result["card"] as { status?: string; log?: string } | undefined;
+
+    check("reports rather than throws", result["failed"] === true);
+    check("shows a failed card", card?.status === "failed");
+    check("carries the real message", /no such app|not a template|failed/i.test(String(card?.log ?? "")));
+    check(
+      "forbids promising a fix",
+      /Do NOT say you are looking into it/i.test(String(result["next"] ?? "")),
+    );
+  }
+
+  console.log("\n6 · a build that never started is not polled forever");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    await call(tools, "assemble_app", {});
+
+    // No start_build, so Drupal has no log: the `pending` case.
+    const result = parse(await call(tools, "check_build", {}));
+    check("reports pending", result["status"] === "pending");
+    check(
+      "tells the agent to stop after a second look",
+      /rather than checking a third time/i.test(String(result["next"] ?? "")),
+    );
+  }
+
   console.log(
     failures === 0
       ? "\nall recovery paths hold\n"

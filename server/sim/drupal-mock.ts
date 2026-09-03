@@ -399,7 +399,19 @@ export async function startDrupalMock(options: {
     async (request, reply) => {
       const id = Number(request.params.id);
       const build = state.builds.get(id);
-      if (!build) return reply.code(404).send({ error: "no build" });
+
+      // Drupal answers a build that has never run with `pending` and a 200, not
+      // a 404 — there is simply no log file yet. Getting this wrong here made
+      // the harness see a hard failure where production sees a quiet wait,
+      // which is the case most likely to strand a conversation.
+      if (!build) {
+        return {
+          status: "pending",
+          package: String(state.apps.get(id)?.["package_name"] ?? ""),
+          log: "",
+          artifact: null,
+        };
+      }
 
       const elapsed = Date.now() - build.startedAt;
       const pkg = String(state.apps.get(id)?.["package_name"] ?? "app");

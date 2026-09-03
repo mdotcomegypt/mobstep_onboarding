@@ -77,8 +77,12 @@ async function call<T>(
   }
 
   if (!response.ok) {
-    const error = (parsed as { error?: string }).error ?? response.statusText;
-    throw new DrupalError(`${method} ${path} failed: ${error}`, response.status);
+    const body = parsed as { error?: string; ref?: string };
+    const error = body.error ?? response.statusText;
+    // Carry the reference through. A bare "internal error" ends the trail for
+    // whoever is on support; with the ref they grep the Drupal log once.
+    const ref = body.ref ? ` [ref ${body.ref}]` : "";
+    throw new DrupalError(`${method} ${path} failed: ${error}${ref}`, response.status);
   }
 
   return parsed as T;
