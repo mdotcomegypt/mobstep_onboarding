@@ -64,7 +64,24 @@ await record("Migrations applied", async () => {
     "SELECT name FROM onboarding_migrations ORDER BY name",
   );
   if (rows.length === 0) throw new Error("no migrations applied — run `pnpm migrate`");
-  return `${rows.length} applied (latest ${rows.at(-1)?.name})`;
+
+  // Compared against the files on disk, not just counted. A migration that
+  // adds a COLUMN passes every other check here -- the table it touches still
+  // exists -- and then fails once per request as a 500 from deep inside a
+  // route. Deploying the code without the schema has to be caught here.
+  const { readdir } = await import("node:fs/promises");
+  const { dirname, join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "db", "migrations");
+  const onDisk = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
+
+  const applied = new Set(rows.map((r) => r.name));
+  const pending = onDisk.filter((f) => !applied.has(f));
+  if (pending.length) {
+    throw new Error(`${pending.join(", ")} not applied — run \`pnpm migrate\` before restarting`);
+  }
+
+  return `${rows.length} applied, none pending (latest ${rows.at(-1)?.name})`;
 });
 
 await record("Onboarding tables", async () => {
