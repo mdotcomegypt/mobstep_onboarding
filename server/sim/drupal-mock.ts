@@ -35,7 +35,7 @@ export interface MockState {
   assets: Map<number, Array<{ kind: string; url: string }>>;
   builds: Map<number, { startedAt: number; mode: string }>;
   /** app id -> when the web publish started. */
-  webPublishes: Map<number, { startedAt: number; count: number }>;
+  webPublishes: Map<number, { startedAt: number; count: number; restarts: number }>;
   /** app id -> package names its google-services.json covers. */
   googleServices: Map<number, string[]>;
 }
@@ -460,7 +460,12 @@ export async function startDrupalMock(options: {
       if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
 
       const previous = state.webPublishes.get(id);
-      state.webPublishes.set(id, { startedAt: Date.now(), count: (previous?.count ?? 0) + 1 });
+      const restart = Boolean((request.body as { restart?: boolean })?.restart);
+      state.webPublishes.set(id, {
+        startedAt: Date.now(),
+        count: (previous?.count ?? 0) + 1,
+        restarts: (previous?.restarts ?? 0) + (restart ? 1 : 0),
+      });
 
       const pkg = String(state.apps.get(id)?.["package_name"] ?? "");
       return {
@@ -469,6 +474,7 @@ export async function startDrupalMock(options: {
         url: `https://${pkg}.mobstep.com`,
         pid: 4242,
         started: true,
+        restarted: restart,
         log: `/sites/default/files/projects/${pkg}/development/web_log.txt`,
       };
     },

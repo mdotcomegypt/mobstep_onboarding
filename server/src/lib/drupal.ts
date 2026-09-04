@@ -291,11 +291,17 @@ export const drupal = {
    * to a launch it has no evidence of, and never truncates its log, so it
    * cannot be polled. This is its v3.0 twin.
    */
-  publishWeb: (appId: number) =>
-    call<{ package: string; url: string; pid: number; started: boolean; log: string }>(
+  /**
+   * `restart` bounces the Next process, which is required the FIRST time a
+   * tenant is published: Next resolves its public/ listing at startup, so a
+   * directory added afterwards is not served and the app's config.json 404s.
+   * It bounces the site for every tenant, so never send it on a re-publish.
+   */
+  publishWeb: (appId: number, restart = false) =>
+    call<{ package: string; url: string; pid: number; started: boolean; restarted: boolean; log: string }>(
       "POST",
       `/api/v3.0/onboarding/app/${appId}/web`,
-      {},
+      { restart },
     ),
 
   webLog: (appId: number, lines = 40) =>

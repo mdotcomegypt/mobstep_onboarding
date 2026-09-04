@@ -254,6 +254,11 @@ try {
     const before = count();
     await call(tools, "set_catalog", {});
     check("a catalog change re-publishes", count() > before, `${before} → ${count()}`);
+
+    // The Next process only has to be bounced for a tenant it has never served.
+    // Doing it on every checkpoint would restart the site for all ~200 apps.
+    const restarts = drupal.state.webPublishes.get(appId)?.restarts ?? 0;
+    check("only the first publish restarts the site", restarts === 1, `restarts = ${restarts}`);
   }
 
   console.log("\n7 · Android is refused when Firebase cannot register it");

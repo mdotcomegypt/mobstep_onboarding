@@ -32,6 +32,9 @@ export interface PublishResult {
 /** How long to wait for a publish before handing it back to the next turn. */
 const SETTLE_MS = 12_000;
 
+/** A first publish restarts the Next process, which takes longer than a copy. */
+const SETTLE_FIRST_MS = 30_000;
+
 /**
  * Records that something Drupal renders has changed.
  *
@@ -61,11 +64,19 @@ export async function publish(
   }
 
   const revision = facts.web.revision;
-  report({ label: "Publishing your web app" });
+  report({
+    label: facts.web.publishedRevision === undefined
+      ? "Putting your web app online"
+      : "Updating your web app",
+  });
+
+  // First publish of this app: the Next process has to be restarted to see the
+  // new tenant directory at all. Every publish after that is a plain file copy.
+  const firstPublish = facts.web.publishedRevision === undefined;
 
   let started;
   try {
-    started = await drupal.publishWeb(appId);
+    started = await drupal.publishWeb(appId, firstPublish);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     trace("web.publish_failed", { appId, reason, message: message.slice(0, 300) }, { sessionId });
@@ -84,7 +95,7 @@ export async function publish(
   // Poll on a widening interval. A publish is seconds, so this usually settles
   // inside the calling tool and the owner never sees a "publishing" state at
   // all — the substantive difference from the Android build, which cannot.
-  const deadline = Date.now() + SETTLE_MS;
+  const deadline = Date.now() + (firstPublish ? SETTLE_FIRST_MS : SETTLE_MS);
   let wait = 800;
 
   while (Date.now() < deadline) {
