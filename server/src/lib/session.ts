@@ -89,6 +89,10 @@ export async function exchangeHandoff(token: string): Promise<OnboardingSession>
         SET email      = COALESCE(EXCLUDED.email, onboarding_sessions.email),
             name       = COALESCE(EXCLUDED.name, onboarding_sessions.name),
             app_id     = COALESCE(EXCLUDED.app_id, onboarding_sessions.app_id),
+            -- A fresh handoff is a fresh sign-in, so it lifts an earlier
+            -- logout rather than handing back a session that loadSession
+            -- would then refuse.
+            revoked_at = NULL,
             updated_at = now()
      RETURNING id, drupal_uid, email, name, app_id, phone, phone_verified_at, status`,
     [claims.uid, claims.email, claims.name, claims.app_id, claims.phone],
@@ -99,11 +103,34 @@ export async function exchangeHandoff(token: string): Promise<OnboardingSession>
 }
 
 export async function loadSession(id: number): Promise<OnboardingSession | null> {
+  // revoked_at IS NULL is the whole of the logout check. Signing out of
+  // Mobstep used to leave this session usable for the rest of its 30 days,
+  // because the handoff token is verified once and never consulted again.
   return one<OnboardingSession>(
     `SELECT id, drupal_uid, email, name, app_id, phone, phone_verified_at, status
-       FROM onboarding_sessions WHERE id = $1`,
+       FROM onboarding_sessions WHERE id = $1 AND revoked_at IS NULL`,
     [id],
   );
+}
+
+/**
+ * Signs a Mobstep user out of this service.
+ *
+ * Called by Drupal's hook_user_logout. Returns how many sessions it closed,
+ * which is 0 for someone who never started onboarding — a normal answer, not
+ * an error.
+ */
+export async function revokeSessionsFor(drupalUid: number): Promise<number> {
+  // RETURNING, because the query helper hands back rows rather than a result
+  // object and there is no rowCount to read.
+  const closed = await query<{ id: number }>(
+    `UPDATE onboarding_sessions
+        SET revoked_at = now()
+      WHERE drupal_uid = $1 AND revoked_at IS NULL
+      RETURNING id`,
+    [drupalUid],
+  );
+  return closed.length;
 }
 
 export async function recordEvent(

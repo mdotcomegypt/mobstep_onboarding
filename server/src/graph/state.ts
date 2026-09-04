@@ -62,6 +62,18 @@ export interface BranchDraft {
   whatsapp?: string;
   address?: string;
   coverage?: Array<{ area: string; price: number }>;
+  /**
+   * How this branch serves customers, and when.
+   *
+   * A branch created without these is a shell: Mobstep gives it no service
+   * types and no opening hours, which reads as "closed, and cannot take an
+   * order" everywhere downstream.
+   */
+  services?: string[];
+  hours?: Array<{ days: string[]; start_time: string; end_time: string }>;
+  currency_code?: string;
+  money_format?: string;
+  timezone?: string;
 }
 
 /**

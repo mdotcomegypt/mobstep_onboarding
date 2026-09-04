@@ -1,12 +1,23 @@
+import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { env } from "../lib/env.ts";
 import {
   SESSION_COOKIE,
   cookieOptions,
   exchangeHandoff,
   recordEvent,
+  revokeSessionsFor,
   signSessionCookie,
 } from "../lib/session.ts";
 import { requireSession } from "./guard.ts";
+
+/** Constant-time header check for the Drupal-to-here calls. */
+function presentedSecretIsValid(presented: string | undefined): boolean {
+  if (!presented) return false;
+  const a = Buffer.from(presented);
+  const b = Buffer.from(env.mobldSecret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -52,10 +63,40 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ session: publicView(session) });
   });
 
-  app.post("/api/session/logout", async (_request, reply) => {
+  app.post("/api/session/logout", async (request, reply) => {
+    // Clearing the cookie alone left the row usable by anyone who still had
+    // the cookie value, so the session is closed server-side too.
+    const session = await requireSession(request, reply).catch(() => null);
+    if (session) await revokeSessionsFor(session.drupal_uid);
     reply.clearCookie(SESSION_COOKIE, cookieOptions);
     return reply.send({ ok: true });
   });
+
+  /**
+   * POST /api/internal/session/revoke — Drupal telling us someone signed out.
+   *
+   * The handoff token is verified once and exchanged for a 30-day cookie, so
+   * without this a Mobstep logout left the onboarding session fully usable.
+   * Server-to-server and guarded by the shared secret; the browser never calls
+   * it.
+   */
+  app.post<{ Body: { uid?: number } }>(
+    "/api/internal/session/revoke",
+    async (request, reply) => {
+      if (!presentedSecretIsValid(request.headers["x-mobld-secret"] as string | undefined)) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+
+      const uid = Number(request.body?.uid);
+      if (!Number.isInteger(uid) || uid <= 0) {
+        return reply.code(400).send({ error: "uid is required" });
+      }
+
+      const closed = await revokeSessionsFor(uid);
+      request.log.info({ uid, closed }, "sessions revoked on Mobstep logout");
+      return reply.send({ ok: true, closed });
+    },
+  );
 }
 
 function publicView(session: {

@@ -25,11 +25,25 @@ export interface CreateAppInput {
   offer?: unknown;
 }
 
+/** One shift. `days` gives several days the same hours in a single entry. */
+export interface BranchHours {
+  days: string[];
+  start_time: string;
+  end_time: string;
+}
+
 export interface BranchInput {
   name: string;
   phone?: string;
   whatsapp?: string;
+  address?: string;
   coverage?: Array<{ area: string; price: number }>;
+  /** delivery | in-store | pickup | drive-through | resources */
+  services?: string[];
+  hours?: BranchHours[];
+  currency_code?: string;
+  money_format?: string;
+  timezone?: string;
 }
 
 export interface CategoryInput {
@@ -217,11 +231,15 @@ export const drupal = {
       patch,
     ),
 
-  createBranches: (appId: number, branches: BranchInput[]) =>
+  /**
+   * `country` names the top of the /coverage settings tree, which is a
+   * separate store from the branch's own delivery areas.
+   */
+  createBranches: (appId: number, branches: BranchInput[], country?: string) =>
     call<{ branches: number[] }>(
       "POST",
       `/api/v3.0/onboarding/app/${appId}/branches`,
-      { branches },
+      { branches, ...(country ? { country } : {}) },
     ),
 
   createCatalog: (appId: number, categories: CategoryInput[], branches: number[] = []) =>

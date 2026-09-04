@@ -144,7 +144,22 @@ const STEPS: Step[] = [
 
       // `missing` carries coverage straight through: BranchInput already models
       // it, and it is the only place a delivery fee can live.
-      const { branches } = await drupal.createBranches(appId, missing);
+      //
+      // Currency and timezone are filled in here rather than asked for. They
+      // are the same for every branch of one business, the conversation has
+      // already established them, and a branch that reaches Mobstep without
+      // them shows prices with no unit.
+      const currency = f.business.currency;
+      const withDefaults = missing.map((b) => ({
+        ...b,
+        ...(b.currency_code ?? currency ? { currency_code: b.currency_code ?? currency } : {}),
+        ...(b.money_format ?? currency
+          ? { money_format: b.money_format ?? `{price} ${currency}` }
+          : {}),
+        ...(b.timezone ? { timezone: b.timezone } : {}),
+      }));
+
+      const { branches } = await drupal.createBranches(appId, withDefaults, f.business.country);
       await mutateFacts(ctx.sessionId, (next) => {
         missing.forEach((branch, i) => {
           const id = branches[i];

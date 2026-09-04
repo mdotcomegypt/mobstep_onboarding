@@ -794,8 +794,27 @@ export function buildTools(ctx: ToolContext) {
         });
       }
 
+      // A branch with no service types and no opening hours reaches Mobstep as
+      // a shell that cannot take an order, and nothing downstream complains.
+      // Chase it here, while the owner is still talking about their branches.
+      const missingServices = branches.filter((b) => !b.services?.length).map((b) => b.name);
+      const missingHours = branches.filter((b) => !b.hours?.length).map((b) => b.name);
+
+      if (missingServices.length || missingHours.length) {
+        return (
+          `Saved ${branches.length} location(s), but they are not ready to take orders yet. ` +
+          (missingServices.length
+            ? `No service types for: ${missingServices.join(", ")}. Ask whether they do delivery, pickup, in-store, or a combination. `
+            : "") +
+          (missingHours.length
+            ? `No opening hours for: ${missingHours.join(", ")}. Ask what hours they open, and whether any day differs. `
+            : "") +
+          "Ask for what is missing, then call set_branches again with the COMPLETE list."
+        );
+      }
+
       return (
-        `Saved ${branches.length} location(s). ` +
+        `Saved ${branches.length} location(s), with service types and opening hours. ` +
         (branches.length === 1
           ? "Ask whether they have any other branches before moving on — call this again with the full list if they do. "
           : "") +
@@ -829,6 +848,50 @@ export function buildTools(ctx: ToolContext) {
               )
               .optional()
               .describe("Where this branch delivers, and what it charges"),
+            // Without these a branch reaches Mobstep as a name and a phone
+            // number: no service types, no opening hours, no currency. It then
+            // reads as permanently closed and cannot take an order.
+            services: z
+              .array(z.enum(["delivery", "in-store", "pickup", "drive-through", "resources"]))
+              .optional()
+              .describe(
+                "How this branch serves customers. Ask; do not assume. Most " +
+                  "food businesses are delivery plus pickup.",
+              ),
+            hours: z
+              .array(
+                z.object({
+                  days: z
+                    .array(
+                      z.enum([
+                        "sunday",
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday",
+                        "saturday",
+                      ]),
+                    )
+                    .describe("Every day this shift applies to"),
+                  start_time: z.string().describe("Opening time, 24-hour HH:MM"),
+                  end_time: z.string().describe("Closing time, 24-hour HH:MM"),
+                }),
+              )
+              .optional()
+              .describe("When this branch is open. One entry can cover several days."),
+            currency_code: z
+              .string()
+              .optional()
+              .describe("ISO code for what this branch charges in, e.g. EGP"),
+            money_format: z
+              .string()
+              .optional()
+              .describe("How a price is written, e.g. '{price} EGP'"),
+            timezone: z
+              .string()
+              .optional()
+              .describe("IANA name, e.g. Africa/Cairo"),
           }),
         ),
       }),

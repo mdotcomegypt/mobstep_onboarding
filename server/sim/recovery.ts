@@ -370,6 +370,97 @@ try {
     check("keeps the page title as a clue", /Error \| Mobstep/i.test(log), log.slice(0, 120));
   }
 
+  console.log("\n12 · a branch reaches Drupal ready to take orders");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+
+    // A name no other case uses: the mock accumulates every branch posted
+    // during the whole run, so a shared name matches an earlier case's.
+    await call(tools, "set_branches", {
+      branches: [
+        {
+          name: "Heliopolis",
+          phone: "01001234567",
+          services: ["delivery", "pickup"],
+          hours: [
+            { days: ["saturday", "sunday", "monday"], start_time: "10:00", end_time: "02:00" },
+          ],
+          coverage: [{ area: "Nasr City", price: 25 }],
+        },
+      ],
+    });
+    await call(tools, "assemble_app", {});
+
+    const sent = [...drupal.state.branches.values()].flat();
+    const branch = sent.find((b) => b["name"] === "Heliopolis") as
+      | Record<string, unknown>
+      | undefined;
+
+    check("the branch was sent", branch !== undefined);
+    check(
+      "with its service types",
+      JSON.stringify(branch?.["services"] ?? []) === JSON.stringify(["delivery", "pickup"]),
+      JSON.stringify(branch?.["services"]),
+    );
+    check("with its opening hours", ((branch?.["hours"] as unknown[]) ?? []).length === 1);
+    check("with its delivery areas", ((branch?.["coverage"] as unknown[]) ?? []).length === 1);
+    // Currency is filled in by assembly rather than asked for: it is the same
+    // for every branch and the conversation already established it.
+    check("with a currency", branch?.["currency_code"] === "EGP", String(branch?.["currency_code"]));
+    check(
+      "with a money format",
+      branch?.["money_format"] === "{price} EGP",
+      String(branch?.["money_format"]),
+    );
+  }
+
+  console.log("\n13 · set_branches chases settings it was not given");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+
+    const bare = await call(tools, "set_branches", {
+      branches: [{ name: "Nasr City", phone: "01001234567" }],
+    });
+    check("says the branch cannot take orders yet", /not ready to take orders/i.test(bare));
+    check("asks about service types", /service types/i.test(bare));
+    check("asks about opening hours", /opening hours/i.test(bare));
+    check(
+      "does not send the owner on to assembly",
+      !/ready for you to build/i.test(bare),
+      bare.slice(0, 120),
+    );
+
+    const complete = await call(tools, "set_branches", {
+      branches: [
+        {
+          name: "Nasr City",
+          phone: "01001234567",
+          services: ["delivery"],
+          hours: [{ days: ["monday"], start_time: "10:00", end_time: "23:00" }],
+        },
+      ],
+    });
+    check("moves on once it has them", /ready for you to build/i.test(complete));
+  }
+
+  console.log("\n14 · signing out of Mobstep closes the onboarding session");
+  {
+    const sessionId = await freshSession();
+    const { loadSession, revokeSessionsFor } = await import("../src/lib/session.ts");
+
+    check("the session starts usable", (await loadSession(sessionId)) !== null);
+
+    const closed = await revokeSessionsFor(UID);
+    check("logging out closes it", closed === 1, `closed ${closed}`);
+    check("and it stops resolving", (await loadSession(sessionId)) === null);
+
+    // Revoking twice must not report work it did not do -- Drupal fires the
+    // logout hook on every sign-out, including ones with no session here.
+    check("a second logout closes nothing", (await revokeSessionsFor(UID)) === 0);
+  }
+
   console.log(
     failures === 0
       ? "\nall recovery paths hold\n"

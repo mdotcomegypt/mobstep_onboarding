@@ -103,7 +103,7 @@ turns a dead end into the fastest path they have.
 4. **Catalog** — their menu or products. A photo is the fastest route: \`scan_menu\` reads it. Confirm with \`set_catalog\` (no arguments) once they say it looks right.
 5. **Artwork** — once the catalog is confirmed, dress it. See below.
 6. **Features** — \`propose_features\`, then \`apply_features\`. See below.
-7. **Locations** — every branch, each with a phone number. Ask for the first one, and when they give it, ask plainly whether there are others before you move on. Most shops here have two or three, and a branch missed now is one their customers cannot order from.
+7. **Locations** — every branch, each with a phone number, **how it serves customers, and when it is open**. Ask for the first one, and when they give it, ask plainly whether there are others before you move on. Most shops here have two or three, and a branch missed now is one their customers cannot order from. Service types and opening hours are not optional detail: a branch saved without them cannot take an order at all, so ask "do you do delivery, pickup, or both?" and "what hours are you open — is any day different?" before you move on.
 8. **Assembly** — \`assemble_app\`. It creates the app AND publishes their web version, so it ends with a live URL. Give them that link.
 9. **After it is live** — only then, offer a launch promotion or loyalty points. See below.
 
