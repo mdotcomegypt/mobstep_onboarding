@@ -11,6 +11,9 @@ import {
   type ItemRef,
 } from "../lib/imagery.ts";
 import { scanMenu } from "../lib/menu.ts";
+import { reconcile } from "./assembly.ts";
+import { publish, republish, touch } from "./web.ts";
+import { prepareAndroid } from "./android.ts";
 import { report } from "../lib/progress.ts";
 import { trace } from "../lib/trace.ts";
 import { mutateFacts } from "./facts.ts";
@@ -45,6 +48,8 @@ export const CARD_TOOLS = new Set([
   "apply_features",
   "create_offer",
   "assemble_app",
+  "publish_web",
+  "check_web",
   "start_build",
   "check_build",
 ]);
@@ -153,6 +158,7 @@ export function buildTools(ctx: ToolContext) {
         facts.brand.palette = palette as Palette;
         facts.phase = "catalog";
       });
+      await touch(ctx.sessionId);
       return `Palette locked in: brand ${palette.brand}. Next: ask for their menu — a photo of it is the fastest way, and you can read photos.`;
     },
     {
@@ -273,6 +279,7 @@ export function buildTools(ctx: ToolContext) {
       await mutateFacts(ctx.sessionId, (facts) => {
         facts.brand.logoUrl = url;
       });
+      await touch(ctx.sessionId);
       return "Logo recorded. Next: if the colour scheme is not settled yet, propose_palette; otherwise move on to the menu.";
     },
     {
@@ -306,6 +313,9 @@ export function buildTools(ctx: ToolContext) {
           "those has returned items."
         );
       }
+
+      await touch(ctx.sessionId);
+      await republish(ctx.sessionId, "catalog");
 
       return (
         `Catalog confirmed: ${cats.length} categories, ${count} items. ` +
@@ -508,6 +518,8 @@ export function buildTools(ctx: ToolContext) {
         }
       });
 
+      await touch(ctx.sessionId);
+
       const card: Card = {
         kind: "gallery",
         title: `Section icons — ${icons.length} drawn`,
@@ -580,6 +592,9 @@ export function buildTools(ctx: ToolContext) {
         }
       });
 
+      await touch(ctx.sessionId);
+      await republish(ctx.sessionId, "artwork");
+
       const card: Card = {
         kind: "gallery",
         title: `Item photos — ${photos.length} shot`,
@@ -628,6 +643,8 @@ export function buildTools(ctx: ToolContext) {
       await mutateFacts(ctx.sessionId, (f) => {
         f.artwork.placeholderUrl = artwork.url;
       });
+
+      await touch(ctx.sessionId);
 
       const card: Card = {
         kind: "gallery",
@@ -716,6 +733,8 @@ export function buildTools(ctx: ToolContext) {
         if (scan.language && !f.business.languages) f.business.languages = [scan.language];
       });
 
+      await touch(ctx.sessionId);
+
       const cats = facts.catalog.categories;
       const total = cats.reduce((n, c) => n + c.items.length, 0);
 
@@ -764,6 +783,8 @@ export function buildTools(ctx: ToolContext) {
         facts.locations.branches = branches;
         facts.phase = "assembly";
       });
+      await touch(ctx.sessionId);
+      await republish(ctx.sessionId, "catalog");
       // More than one branch means the app needs a branch picker. Asking
       // "would you like customers to choose a branch?" straight after they have
       // given you two addresses is a question with one sensible answer.
@@ -783,7 +804,8 @@ export function buildTools(ctx: ToolContext) {
     },
     {
       name: "set_branches",
-      description: "Save the business's locations. At least one is required before assembly.",
+      description:
+        "Save the business's locations, and the areas each one delivers to. At least one branch is required before assembly. Send the COMPLETE list every time — it replaces what is stored, so include branches you are not changing.",
       schema: z.object({
         branches: z.array(
           z.object({
@@ -791,6 +813,22 @@ export function buildTools(ctx: ToolContext) {
             phone: z.string().optional(),
             whatsapp: z.string().optional(),
             address: z.string().optional(),
+            // Delivery areas and their fees live here, on the branch.
+            //
+            // Without this the agent had no way to record a delivery fee at
+            // all — and when an owner asked for one it reached for
+            // apply_features instead and reported success for something it had
+            // not done. A tool that cannot do a thing is not neutral: the model
+            // will find the nearest tool that returns "ok".
+            coverage: z
+              .array(
+                z.object({
+                  area: z.string().describe("The area or district name, as the owner says it"),
+                  price: z.number().describe("Delivery fee for that area, in their currency"),
+                }),
+              )
+              .optional()
+              .describe("Where this branch delivers, and what it charges"),
           }),
         ),
       }),
@@ -904,6 +942,9 @@ export function buildTools(ctx: ToolContext) {
       await mutateFacts(ctx.sessionId, (f) => {
         f.features = report.applied;
       });
+
+      await touch(ctx.sessionId);
+      await republish(ctx.sessionId, "features");
 
       const manifest = await drupal.manifest();
       const label = (id: string): string => manifest.features[id]?.label ?? id;
@@ -1068,244 +1109,117 @@ export function buildTools(ctx: ToolContext) {
 
   const assembleApp = tool(
     async ({ packageName, plan }) => {
-     try {
-      const current = await mutateFacts(ctx.sessionId, (f) => {
+      await mutateFacts(ctx.sessionId, (f) => {
         f.phase = "assembly";
       });
 
-      // Derived, not asked. A store owner has no basis for choosing an Android
-      // package slug, and making them invent one mid-conversation is a question
-      // that only exists because the field does.
-      if (!current.business.name) {
-        throw new Error("The business name is not set yet.");
-      }
-      const slug = packageName ?? slugify(current.business.name, ctx.uid);
-
-      const facts = await mutateFacts(ctx.sessionId, (f) => {
-        f.packageName = slug;
+      const result = await reconcile(ctx, {
+        ...(packageName ? { packageName } : {}),
+        ...(plan ? { plan } : {}),
       });
 
-      // Idempotent: a retry after a partial failure must not create a second
-      // tenancy for the same owner.
-      if (facts.appId) {
-        return `This app is already assembled (#${facts.appId}, package "${facts.packageName}"). Use start_build to build it.`;
+      if (result.fatal) {
+        trace("assemble.failed", { message: result.fatal.slice(0, 400) }, { sessionId: ctx.sessionId });
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Could not create the app",
+            status: "failed",
+            log: result.fatal.replace(/\s+/g, " ").slice(0, 500),
+          } satisfies Card,
+          failed: true,
+          next:
+            "The failure is on screen with its real message. Say in one line what " +
+            "did not work, in their terms. Nothing was lost — everything collected " +
+            "is still saved. Ask whether to try again and WAIT for their answer. " +
+            "Do NOT say you are looking into it, investigating, or fixing it — " +
+            "nothing runs after your turn ends.",
+        });
       }
 
-      const business = facts.business;
-      if (!business.name) throw new Error("The business name is not set yet.");
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const items = facts.catalog.categories.reduce((n, c) => n + c.items.length, 0);
+      const icons = facts.catalog.categories.filter((c) => c.iconUrl).length;
+      const photos = facts.catalog.categories.reduce(
+        (n, c) => n + c.items.filter((i) => i.imageUrl).length,
+        0,
+      );
 
-      const base = {
-        uid: ctx.uid,
-        name: business.name,
-        package_name: slug,
-        plan: plan ?? "starter",
-        business_type: business.type ?? "general",
-        language: business.languages?.[0] ?? "en",
-        currency: business.currency ?? "USD",
+      const failed = result.outcomes.filter((o) => o.status === "failed");
+      const ran = result.outcomes.filter((o) => o.ran && o.status === "done");
+
+      // Publish immediately. This is the moment the app stops being a
+      // conversation and becomes a URL the owner can open on their phone, and
+      // it costs a file copy — so there is nothing to weigh and no reason to
+      // make the model remember.
+      const web = await publish(ctx.sessionId, "assembly");
+
+      // Each step reports itself. "Assembled" as a single word is what let an
+      // app with a name and nothing else look like a success.
+      const line = (o: (typeof result.outcomes)[number]): string => {
+        const mark =
+          o.status === "failed" ? "✗" : o.ran ? "+" : o.status === "skipped" ? "·" : "=";
+        const note =
+          o.status === "failed" ? `  ${o.error ?? ""}`.slice(0, 60)
+          : o.ran ? ""
+          : o.status === "skipped" ? "  nothing to do"
+          : "  already done";
+        return `${mark} ${o.step.padEnd(9)}${note}`;
       };
 
-      report({ label: `Creating "${business.name}" in Mobstep` });
-
-      // The app itself is the one step that must not be lost to something
-      // cosmetic. A template that is not published, or was deleted since it was
-      // chosen, answers `Theme N is not a template.` — and until now that 400
-      // took the entire assembly with it, after the owner had spent ten minutes
-      // on the menu. The layout is decoration; the app is the thing they came
-      // for. So a theme failure retries without it and says so.
-      let created: { application_id: number; package: string };
-      const notes: string[] = [];
-
-      try {
-        created = await drupal.createApp({
-          ...base,
-          // Omitted when null: the app then keeps the mobstep_android_core
-          // defaults that create_new_project.sh laid down.
-          ...(facts.themeId ? { theme: facts.themeId } : {}),
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (facts.themeId && /theme/i.test(message)) {
-          trace("assemble.theme_rejected", { themeId: facts.themeId, message: message.slice(0, 200) });
-          await mutateFacts(ctx.sessionId, (f) => {
-            f.themeId = null;
-          });
-          report({ label: "That layout is unavailable — using the standard one" });
-          created = await drupal.createApp(base);
-          notes.push(
-            "The layout they picked was not available, so the app uses the standard Mobstep one. Mention it in passing.",
-          );
-        } else {
-          throw error;
-        }
-      }
-
-      const appId = created.application_id;
-      await mutateFacts(ctx.sessionId, (f) => {
-        f.appId = appId;
-        f.packageName = created.package;
-      });
-
-      if (facts.brand.palette) {
-        report({ label: "Applying your colours across the app" });
-        const p = facts.brand.palette;
-        // Design-system tokens, not individual keys: 755 of the app's colour
-        // keys reference these, so this is what actually repaints the app.
-        await drupal.setTheme(appId, {
-          tokens: {
-            brand: p.brand,
-            on_brand: p.onBrand,
-            surface: p.surface,
-            on_surface: p.onSurface,
-            border: p.border,
-          },
-          // These three are not tokenized in the core (they are the Android
-          // theme's own attributes), so they are set directly.
-          colors: {
-            global_colorPrimary: p.brand,
-            global_colorPrimaryDark: p.brand,
-            global_colorAccent: p.brand,
-          },
-        });
-      }
-
-      if (facts.brand.logoUrl) {
-        report({ label: "Attaching your logo and app icon" });
-        // Non-fatal: an unreachable image must not lose the whole app. The
-        // owner can re-upload from the dashboard.
-        try {
-          await drupal.addAsset(appId, "logo", facts.brand.logoUrl);
-          await drupal.addAsset(appId, "icon", facts.brand.logoUrl);
-        } catch (error) {
-          console.error("logo attach failed", error);
-        }
-      }
-
-      // Features before content. They decide which blocks exist on each screen,
-      // and a catalog written into a screen whose list block is switched off is
-      // invisible — with nothing anywhere reporting it.
-      if (facts.features.length > 0) {
-        report({ label: "Switching on the features you chose" });
-        try {
-          const applied = await drupal.setFeatures(appId, facts.features);
-          await mutateFacts(ctx.sessionId, (f) => {
-            f.features = applied.applied;
-          });
-        } catch (error) {
-          // Non-fatal — an app with template defaults is still a working app —
-          // but not silent. Swallowing this left the owner told their features
-          // were on when they were not, which is worse than the failure.
-          const message = error instanceof Error ? error.message : String(error);
-          trace("assemble.features_failed", { appId, message: message.slice(0, 200) });
-          notes.push(
-            "The features could not be switched on, so the app has the template's " +
-              "defaults. Say so plainly and tell them it can be changed from the dashboard.",
-          );
-        }
-      }
-
-      // Branches next, then the catalog against them. Drupal attaches every
-      // category to the branch ids it is handed, so a catalog created before
-      // the branches exist belongs to nothing and shows up in no branch's menu.
-      report({ label: "Creating your branches" });
-      const branchIds = facts.locations.branches.length
-        ? (await drupal.createBranches(appId, facts.locations.branches)).branches
-        : [];
-
-      if (facts.catalog.categories.length) {
-        const items = facts.catalog.categories.reduce((n, c) => n + c.items.length, 0);
-        report({
-          label: `Building ${facts.catalog.categories.length} categories and ${items} items`,
-        });
-
-        // The placeholder is applied here rather than at extraction time so it
-        // covers whatever the catalog looks like at assembly — including items
-        // added after the artwork was generated.
-        const placeholder = facts.artwork.placeholderUrl;
-        await drupal.createCatalog(
-          appId,
-          facts.catalog.categories.map((category) => ({
-            name: category.name,
-            ...(category.iconUrl ? { image: category.iconUrl } : {}),
-            items: category.items.map((item) => ({
-              name: item.name,
-              ...(item.price === undefined ? {} : { price: item.price }),
-              ...(item.description ? { description: item.description } : {}),
-              ...(item.imageUrl ?? placeholder ? { image: item.imageUrl ?? placeholder } : {}),
-            })),
-          })),
-          branchIds,
-        );
-      }
-
-      const artwork = [
-        facts.catalog.categories.filter((c) => c.iconUrl).length,
-        facts.catalog.categories.reduce(
-          (n, c) => n + c.items.filter((i) => i.imageUrl).length,
-          0,
-        ),
-      ];
-
-      const items = facts.catalog.categories.reduce((n, c) => n + c.items.length, 0);
-
-      // A card, not just prose. Assembly is the moment the app stops being a
-      // conversation and starts existing, and "it's assembled" in a sentence is
-      // indistinguishable from the same sentence when nothing happened.
       const card: Card = {
         kind: "progress",
-        label: `${business.name} is in Mobstep`,
-        status: "success",
+        label: failed.length > 0
+          ? `${facts.business.name} is in Mobstep, with gaps`
+          : web.status === "live"
+            ? `${facts.business.name} is live`
+            : `${facts.business.name} is in Mobstep`,
+        status: failed.length > 0 ? "failed" : "success",
         log: [
-          `app        #${appId}  (${created.package})`,
-          `locations  ${branchIds.length}`,
-          `categories ${facts.catalog.categories.length}  (${artwork[0]} with icons)`,
-          `items      ${items}  (${artwork[1]} photographed, the rest on your placeholder)`,
+          ...result.outcomes.map(line),
+          "",
+          `app        #${String(result.appId)}  (${result.package ?? "?"})`,
+          `locations  ${facts.assembly.branches.length}`,
+          `categories ${facts.catalog.categories.length}  (${icons} with icons)`,
+          `items      ${items}  (${photos} photographed, the rest on your placeholder)`,
           `features   ${facts.features.length}`,
+          ...(web.url ? ["", `web        ${web.url}`] : []),
         ].join("\n"),
       };
 
       return JSON.stringify({
         card,
-        appId,
-        package: created.package,
-        notes,
-        next:
-          (notes.length > 0 ? notes.join(" ") + " " : "") +
-          "Then say the app exists and ask whether to build it. Do not repeat the numbers — the card has them.",
+        appId: result.appId,
+        package: result.package,
+        ran: ran.map((o) => o.step),
+        failed: failed.map((o) => ({ step: o.step, error: o.error })),
+        notes: result.notes,
+        next: [
+          result.notes.join(" "),
+          failed.length > 0
+            ? `These parts did not go through: ${failed.map((o) => o.step).join(", ")}. ` +
+              "Say so plainly in one line, and that running it again will pick up " +
+              "exactly those — nothing is duplicated by trying twice."
+            : "",
+          web.status === "live"
+            ? `Their app is LIVE at ${String(web.url)}. Give them that link and ` +
+              "tell them to open it on their phone — it is a real working shop, " +
+              "not a picture of one. Ask what they want to change."
+            : web.status === "publishing"
+              ? "The web app is still publishing. Say it will be ready in a moment " +
+                "and call check_web in your NEXT turn."
+              : web.status === "failed"
+                ? "The app was created but the web version did not publish. Say so " +
+                  "plainly, and that nothing is lost. Do NOT promise to retry."
+                : "Say the app exists and ask what they want to change.",
+          "Do not repeat the numbers — the card has them.",
+        ].filter(Boolean).join(" "),
       });
-     } catch (error) {
-      // A failed assembly used to reach the owner only as whatever the model
-      // chose to say about it — in production, "there was an issue with the
-      // theme. I'll try to fix it and re-assemble", a paraphrase that named no
-      // step and promised a retry that never came.
-      //
-      // So the failure gets a card of its own carrying the real message, and
-      // the model is told plainly not to promise anything it is not doing.
-      const message = error instanceof Error ? error.message : String(error);
-      trace("assemble.failed", { message: message.slice(0, 400) }, { sessionId: ctx.sessionId });
-
-      const card: Card = {
-        kind: "progress",
-        label: "Could not create the app",
-        status: "failed",
-        log: message.replace(/\s+/g, " ").slice(0, 500),
-      };
-
-      return JSON.stringify({
-        card,
-        failed: true,
-        next:
-          "The failure is on screen with its real message. Say in one line what " +
-          "did not work, in their terms. Nothing was lost — everything collected " +
-          "is still saved. Ask whether to try again, and WAIT for them to answer. " +
-          "Do NOT say you will retry, fix it, or look into it: you have no way to " +
-          "do anything after this turn ends, and promising it strands them.",
-      });
-     }
     },
     {
       name: "assemble_app",
       description:
-        "Create the app in Mobstep from everything collected so far: branding, catalog and locations. Both arguments are optional and are worked out for you — never ask the owner for a package name or a plan. Call once, after they confirm they are ready.",
+        "Create the app in Mobstep from everything collected so far: branding, catalog, features and locations. Safe to call again after a failure — it resumes the steps that did not go through and never duplicates the ones that did. Both arguments are optional and worked out for you; never ask the owner for a package name or a plan.",
       schema: z.object({
         packageName: z
           .string()
@@ -1321,19 +1235,154 @@ export function buildTools(ctx: ToolContext) {
   );
 
   /**
-   * The build.
+   * The web app.
    *
-   * Both of these used to let a failure reach the owner only as whatever the
-   * model chose to say about it. In production that was "I'm still encountering
-   * an issue when trying to start the build. I'm looking into it." — a sentence
-   * that names nothing, and promises work that cannot happen: the turn ends
-   * when the model stops writing.
+   * This is what the owner gets at the end of onboarding. It is derived from
+   * the same Android resource XML the phone app is built from, so what they see
+   * is what they have — and publishing is a file copy, so they see it in
+   * seconds rather than after a Gradle build that may not even be possible.
    */
+
+  const publishWeb = tool(
+    async () => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      if (!facts.appId) {
+        return JSON.stringify({
+          failed: true,
+          next:
+            "The app has not been created in Mobstep yet, so there is nothing to " +
+            "publish. Say that plainly and offer to assemble it now.",
+        });
+      }
+
+      const result = await publish(ctx.sessionId, "manual");
+
+      if (result.status === "live" && result.url) {
+        const url = result.url;
+        return JSON.stringify({
+          card: { kind: "link", label: `Your app is live — ${url}`, href: url } satisfies Card,
+          url: result.url,
+          next:
+            "Give them the link and tell them to open it on their phone. It is a " +
+            "real, working shop — not a picture of one. Then ask what they want " +
+            "to change.",
+        });
+      }
+
+      if (result.status === "failed") {
+        trace("web.publish_reported_failed", { appId: facts.appId }, { sessionId: ctx.sessionId });
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Could not publish your web app",
+            status: "failed",
+            log: (result.log ?? "").replace(/\s+/g, " ").slice(0, 500),
+          } satisfies Card,
+          failed: true,
+          next:
+            "The failure is on screen. Say in one line what did not work. Nothing " +
+            "was lost. Ask whether to try again and WAIT — do NOT say you are " +
+            "looking into it or will retry.",
+        });
+      }
+
+      if (result.status === "unchanged" && result.url) {
+        const url = result.url;
+        return JSON.stringify({
+          card: { kind: "link", label: `Your app — ${url}`, href: url } satisfies Card,
+          next: "Nothing has changed since the last publish. Just give them the link again.",
+        });
+      }
+
+      return JSON.stringify({
+        url: result.url,
+        next:
+          "It is still publishing. Say it will be ready in a moment, then call " +
+          "check_web in your NEXT turn — do not promise to check later, just check.",
+      });
+    },
+    {
+      name: "publish_web",
+      description:
+        "Publish the owner's web app and get its live URL. Runs automatically after assembly and after any change, so call it only when they ask for the link again or after a failure.",
+      schema: z.object({}),
+    },
+  );
+
+  const checkWeb = tool(
+    async () => {
+      const facts = await mutateFacts(ctx.sessionId, () => {});
+      const appId = facts.appId;
+      if (!appId) {
+        return JSON.stringify({ failed: true, next: "No app exists, so nothing is publishing." });
+      }
+
+      let status;
+      try {
+        status = await drupal.webLog(appId, 20);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Could not read the publish log",
+            status: "failed",
+            log: message.replace(/\s+/g, " ").slice(0, 400),
+          } satisfies Card,
+          failed: true,
+          next: "Say what did not work, in one line. Do NOT promise to look into it.",
+        });
+      }
+
+      if (status.status === "success") {
+        await mutateFacts(ctx.sessionId, (f) => {
+          f.web.status = "live";
+          f.web.url = status.url;
+          f.web.publishedRevision = f.web.revision;
+          if (f.phase === "assembly") f.phase = "web";
+        });
+        return JSON.stringify({
+          card: { kind: "link", label: `Your app is live — ${status.url}`, href: status.url } satisfies Card,
+          url: status.url,
+          next: "Give them the link and tell them to open it on their phone.",
+        });
+      }
+
+      if (status.status === "failed") {
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Publishing failed",
+            status: "failed",
+            log: status.log.split("\n").slice(-8).join("\n"),
+          } satisfies Card,
+          failed: true,
+          next:
+            "The log is on screen. Say in one line that it did not publish and that " +
+            "everything they set up is saved. Ask whether to try again and WAIT.",
+        });
+      }
+
+      return JSON.stringify({
+        status: status.status,
+        next:
+          "Still publishing. Say so in one line and ask them to hold on; check " +
+          "again when they reply — and if it is still not done on the second " +
+          "look, tell them the team will pick it up rather than checking a third time.",
+      });
+    },
+    {
+      name: "check_web",
+      description: "Check whether the web app has finished publishing.",
+      schema: z.object({}),
+    },
+  );
 
   const startBuild = tool(
     async () => {
       const facts = await mutateFacts(ctx.sessionId, (f) => {
         f.phase = "build";
+        f.android.requested = true;
       });
       const appId = facts.appId ?? ctx.appId;
 
@@ -1350,28 +1399,74 @@ export function buildTools(ctx: ToolContext) {
         });
       }
 
+      // The Android build has a compile-time Firebase dependency: a package with
+      // no client in google-services.json cannot compile, and Gradle discovers
+      // that four minutes in. Register first, and fail in a sentence if we
+      // cannot — the owner's web app is unaffected either way.
+      const ready = await prepareAndroid(ctx.sessionId, appId);
+      if (!ready.ready) {
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Cannot build the Android app yet",
+            status: "failed",
+            log: (ready.reason ?? "").replace(/\s+/g, " ").slice(0, 500),
+          } satisfies Card,
+          failed: true,
+          next:
+            "Say in one line that the Android app is not possible right now and " +
+            "why, in their terms. Their web app is unaffected and still live. " +
+            "Do NOT promise to sort it out — this one needs a person.",
+        });
+      }
+
+      let launch;
       try {
-        await drupal.build(appId, "debug");
+        launch = await drupal.build(appId, "debug");
       } catch (error) {
         return buildFailure("Could not start the build", error, ctx.sessionId, appId);
+      }
+
+      // Only claim a build is running if the server proved one is.
+      //
+      // An older server answers without `started`, and there is no way to tell
+      // its silence from a real launch — so say so rather than asserting a
+      // process exists. Announcing a build that never began is worse than
+      // admitting uncertainty: the owner waits, and nothing ever arrives.
+      if (launch.started !== true) {
+        trace("build.unconfirmed", { appId, pid: launch.pid ?? null }, { sessionId: ctx.sessionId });
+        return JSON.stringify({
+          card: {
+            kind: "progress",
+            label: "Build requested",
+            status: "running",
+          } satisfies Card,
+          next:
+            "The build was requested but the server did not confirm a process " +
+            "started. Say it has been requested — not that it is building — and " +
+            "check_build in your next turn to find out.",
+        });
       }
 
       const card: Card = {
         kind: "progress",
         label: "Building your Android app",
         status: "running",
+        log: `started · pid ${String(launch.pid)}`,
       };
       return JSON.stringify({
         card,
+        pid: launch.pid,
         next:
-          "Say it has started and that it takes a few minutes. Then call " +
+          "It is genuinely running. Say it takes a few minutes, then call " +
           "check_build in your NEXT turn — do not promise to check later, just " +
           "check.",
       });
     },
     {
       name: "start_build",
-      description: "Start the Android build. Call after assemble_app has succeeded.",
+      description:
+        "Build the Android APK. ONLY when the owner has explicitly asked for one — the web app is what onboarding delivers, and an APK is an optional extra that takes minutes rather than seconds. It registers the app with Firebase first, which the build requires before it can compile.",
       schema: z.object({}),
     },
   );
@@ -1473,6 +1568,8 @@ export function buildTools(ctx: ToolContext) {
     createOffer,
     setupLoyalty,
     assembleApp,
+    publishWeb,
+    checkWeb,
     startBuild,
     checkBuild,
   ];

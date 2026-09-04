@@ -368,3 +368,65 @@ describe("tool schemas — what Gemini will actually accept", () => {
     }
   });
 });
+
+describe("menu tidy — an over-eager merge is trimmed, not discarded", () => {
+  /**
+   * The tidy pass exists to fix three specific mistakes: the shop's own name
+   * read as a section, one heading printed in two languages, and an add-on
+   * strip. None of them merges more than a couple of sections.
+   *
+   * Asked to tidy a 9-section menu, the model instead collapsed it to three,
+   * with sixty unrelated items under "Manakeesh". That loses the structure of
+   * the owner's own menu — far worse than the duplicate it was fixing. So the
+   * SHAPE of the plan is checked, not just whether its indexes resolve.
+   */
+  const MAX = 2;
+
+  /** Mirrors lib/menu.ts: clamp each section's merges, then sanity-check. */
+  const clamp = (
+    categories: number,
+    keep: Array<{ mergeFrom?: number[] }>,
+  ): { keep: Array<{ mergeFrom?: number[] }>; accepted: boolean } => {
+    const clamped = keep.map((k) => ({
+      ...k,
+      ...(k.mergeFrom ? { mergeFrom: k.mergeFrom.slice(0, MAX) } : {}),
+    }));
+    const merged = clamped.reduce((n, k) => n + (k.mergeFrom?.length ?? 0), 0);
+    const survivors = clamped.length + Math.max(0, categories - clamped.length - merged);
+    return { keep: clamped, accepted: survivors >= Math.ceil(categories * 0.5) };
+  };
+
+  it("leaves a duplicated language heading merge alone", () => {
+    const { keep, accepted } = clamp(7, [{ mergeFrom: [4] }, {}, {}, {}, {}, {}]);
+    assert.equal(accepted, true);
+    assert.deepEqual(keep[0]?.mergeFrom, [4]);
+  });
+
+  it("leaves an add-on strip fold alone", () => {
+    const { keep, accepted } = clamp(9, [{ mergeFrom: [1, 2] }, {}, {}, {}, {}, {}, {}]);
+    assert.equal(accepted, true);
+    assert.deepEqual(keep[0]?.mergeFrom, [1, 2]);
+  });
+
+  it("clamps one section swallowing four others, keeping the first two", () => {
+    // The real Rosto case: the model proposed 9 -> 4. Rejecting the whole plan
+    // left both the shop name and the duplicate heading standing, so the
+    // over-reach is trimmed rather than the plan discarded.
+    const { keep, accepted } = clamp(9, [{ mergeFrom: [1, 2, 3, 4] }, {}, {}]);
+    assert.deepEqual(keep[0]?.mergeFrom, [1, 2]);
+    assert.equal(accepted, true);
+  });
+
+  it("still refuses a plan that is aggressive everywhere at once", () => {
+    const { accepted } = clamp(9, [
+      { mergeFrom: [1, 2] },
+      { mergeFrom: [3, 4] },
+      { mergeFrom: [5, 6] },
+    ]);
+    assert.equal(accepted, false);
+  });
+
+  it("accepts a plan that changes nothing", () => {
+    assert.equal(clamp(6, [{}, {}, {}, {}, {}, {}]).accepted, true);
+  });
+});

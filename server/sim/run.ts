@@ -651,8 +651,12 @@ async function collect(
   console.log(`  items              ${totalItems}  (${photographed} photographed)`);
   console.log(`  placeholder        ${(facts?.["artwork"] as { placeholderUrl?: string })?.placeholderUrl ? "yes" : "no"}`);
   console.log(`  branches           ${((facts?.["locations"] as { branches?: unknown[] })?.branches ?? []).length}`);
+  const steps = (facts?.["assembly"] as { steps?: Record<string, { status: string }> } | undefined)?.steps ?? {};
+  console.log(`  assembly steps     ${Object.entries(steps).map(([k, v]) => `${k}:${v.status}`).join("  ")}`);
   const features = (facts?.["features"] as string[] | undefined) ?? [];
   console.log(`  features           ${features.length}${features.length ? "  " + features.join(", ") : ""}`);
+  const web = (facts?.["web"] as { url?: string; status?: string } | undefined) ?? {};
+  console.log(`  web app            ${web.status ?? "none"}${web.url ? "  " + web.url : ""}`);
   console.log(`  app id             ${String(facts?.["appId"] ?? "—")}`);
   console.log(`  package            ${String(facts?.["packageName"] ?? "—")}`);
   console.log("");

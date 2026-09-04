@@ -30,13 +30,22 @@ export async function previewRoutes(app: FastifyInstance): Promise<void> {
     const facts = await loadFacts(session.id);
     const appId = facts.appId ?? session.app_id;
 
+    // The published web app, if there is one. This is what turns the pane from
+    // a drawing of an app into the app: an iframe of the merchant's own URL.
+    const web = {
+      url: facts.web.url ?? null,
+      status: facts.web.status,
+      /** True when something has changed since the last publish. */
+      stale: facts.web.publishedRevision !== facts.web.revision,
+    };
+
     if (!appId) {
-      return reply.send({ stage: "projected", appId: null, live: null });
+      return reply.send({ stage: "projected", appId: null, live: null, web });
     }
 
     try {
       const live = await drupal.preview(appId);
-      return reply.send({ stage: "live", appId, live });
+      return reply.send({ stage: "live", appId, live, web });
     } catch (error) {
       // A failure here must not blank the pane. The projected view is still
       // true about everything the conversation has decided, which is most of
@@ -50,6 +59,7 @@ export async function previewRoutes(app: FastifyInstance): Promise<void> {
         stage: "projected",
         appId,
         live: null,
+        web,
         note: "Could not read the built app just now; showing what we have so far.",
       });
     }

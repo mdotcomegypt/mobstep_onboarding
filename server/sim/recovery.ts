@@ -161,13 +161,130 @@ try {
     check("reports failure rather than throwing", result["failed"] === true);
     check("shows a failed card the owner can see", card?.kind === "progress" && card.status === "failed");
     check("carries the real message", Boolean(card?.log));
+    // Asserted on the behaviour, not one phrase: the guidance must both refuse
+    // the promise and tell the model to wait. Pinning exact wording made this
+    // fail the moment the sentence was reworded, which is a test measuring
+    // itself rather than the thing that matters.
+    const guidance = String(result["next"] ?? "");
     check(
-      "forbids promising a retry",
-      /Do NOT say you will retry/i.test(String(result["next"] ?? "")),
+      "forbids promising a follow-up",
+      /Do NOT say you (are|will)[^.]*(retry|look|investigat|fix)/i.test(guidance),
+      guidance.slice(0, 100),
     );
+    check("tells the model to wait for an answer", /WAIT for their answer/i.test(guidance));
   }
 
-  console.log("\n4 · start_build before the app exists");
+  console.log("\n4 · assembly resumes a half-built app without duplicating");
+  {
+    const sessionId = await freshSession();
+    const facts = await loadFacts(sessionId);
+    facts.locations.branches = [
+      { name: "Nasr City", phone: "01001234567" },
+      { name: "Maadi", phone: "01009876543" },
+    ];
+    await saveFacts(sessionId, facts);
+
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    const first = parse(await call(tools, "assemble_app", {}));
+    const afterFirst = await loadFacts(sessionId);
+
+    check("first run creates the app", typeof first["appId"] === "number");
+    check("both branches created", afterFirst.assembly.branches.length === 2,
+      `branches = ${afterFirst.assembly.branches.length}`);
+    check("catalog recorded", afterFirst.assembly.categories.length > 0);
+
+    const drupalBranchesAfterFirst = [...drupal.state.branches.values()].flat().length;
+
+    // Simulate the exact production failure: the theme step never went through.
+    const broken = await loadFacts(sessionId);
+    delete broken.assembly.steps.theme;
+    await saveFacts(sessionId, broken);
+
+    const second = parse(await call(tools, "assemble_app", {}));
+    const afterSecond = await loadFacts(sessionId);
+    const drupalBranchesAfterSecond = [...drupal.state.branches.values()].flat().length;
+
+    check("second run re-runs only the missing step",
+      JSON.stringify(second["ran"] ?? []) === '["theme"]',
+      `ran = ${JSON.stringify(second["ran"])}`);
+    check("branches are NOT duplicated",
+      drupalBranchesAfterSecond === drupalBranchesAfterFirst,
+      `${drupalBranchesAfterFirst} → ${drupalBranchesAfterSecond}`);
+    check("categories are NOT duplicated",
+      afterSecond.assembly.categories.length === afterFirst.assembly.categories.length);
+    check("a third run does nothing at all",
+      JSON.stringify(parse(await call(tools, "assemble_app", {}))["ran"] ?? []) === "[]");
+  }
+
+  console.log("\n5 · assembly publishes the web app and hands over the URL");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    const result = parse(await call(tools, "assemble_app", {}));
+    const facts = await loadFacts(sessionId);
+
+    check("the web app is live", facts.web.status === "live", `status = ${facts.web.status}`);
+    check("a real URL was recorded", /^https:\/\/.+\.mobstep\.com$/.test(facts.web.url ?? ""),
+      facts.web.url ?? "(none)");
+    check("the URL is on the card", String((result["card"] as {log?:string})?.log ?? "").includes("mobstep.com"));
+    check("the agent is told to hand it over", /LIVE at https/i.test(String(result["next"] ?? "")));
+    check("the phase moved to web", facts.phase === "web", facts.phase);
+    check("published revision is recorded", facts.web.publishedRevision === facts.web.revision);
+  }
+
+  console.log("\n6 · a change re-publishes; an unchanged app does not");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    await call(tools, "assemble_app", {});
+
+    // Every freshSession() creates a NEW app, so the id has to come from the
+    // facts rather than being assumed — reading a hardcoded 9000 silently
+    // measured a different app's publish count and passed for the wrong reason.
+    const appId = (await loadFacts(sessionId)).appId ?? 0;
+    const count = (): number => drupal.state.webPublishes.get(appId)?.count ?? 0;
+    const first = count();
+    check("assembly published once", first === 1, `count = ${first}`);
+
+    // No change: assembling again must not re-publish.
+    await call(tools, "assemble_app", {});
+    check("an unchanged app is not re-published", count() === first, `${first} → ${count()}`);
+
+    // A real change: the catalog is confirmed.
+    const before = count();
+    await call(tools, "set_catalog", {});
+    check("a catalog change re-publishes", count() > before, `${before} → ${count()}`);
+  }
+
+  console.log("\n7 · Android is refused when Firebase cannot register it");
+  {
+    const sessionId = await freshSession();
+    const tools = buildTools({ sessionId, uid: UID, appId: null });
+    await call(tools, "assemble_app", {});
+
+    // No credentials configured — the operator case. The owner must be told
+    // plainly, and their web app must be unaffected.
+    const saved = process.env["FIREBASE_CREDENTIALS"];
+    delete process.env["FIREBASE_CREDENTIALS"];
+    const result = parse(await call(tools, "start_build", {}));
+    if (saved) process.env["FIREBASE_CREDENTIALS"] = saved;
+
+    const card = result["card"] as { label?: string; status?: string; log?: string } | undefined;
+    check("refuses rather than starting a doomed build", result["failed"] === true);
+    check("says it is the Android app that cannot be built",
+      /Cannot build the Android app/i.test(String(card?.label ?? "")));
+    check("names the real reason", /FIREBASE_CREDENTIALS/i.test(String(card?.log ?? "")),
+      String(card?.log ?? "").slice(0, 80));
+    check("reassures them the web app is fine",
+      /web app is unaffected/i.test(String(result["next"] ?? "")));
+    check("does not promise to sort it out",
+      /Do NOT promise/i.test(String(result["next"] ?? "")));
+
+    const facts = await loadFacts(sessionId);
+    check("the web app really is still live", facts.web.status === "live", facts.web.status);
+  }
+
+  console.log("\n8 · start_build before the app exists");
   {
     const sessionId = await freshSession();
     const tools = buildTools({ sessionId, uid: UID, appId: null });
@@ -184,7 +301,7 @@ try {
     );
   }
 
-  console.log("\n5 · the build endpoint rejects the call");
+  console.log("\n9 · the build endpoint rejects the call");
   {
     const sessionId = await freshSession();
     const tools = buildTools({ sessionId, uid: UID, appId: null });
@@ -203,14 +320,19 @@ try {
 
     check("reports rather than throws", result["failed"] === true);
     check("shows a failed card", card?.status === "failed");
-    check("carries the real message", /no such app|not a template|failed/i.test(String(card?.log ?? "")));
+    check("carries the real message", /no such app|not a template|failed/i.test(String(card?.log ?? "")),
+      String(card?.log ?? "").slice(0, 80));
+    // The refusal now happens at the Firebase check, before any build is
+    // started — earlier and more specific than before. What must hold either
+    // way is that it does not promise a follow-up it cannot make.
     check(
       "forbids promising a fix",
-      /Do NOT say you are looking into it/i.test(String(result["next"] ?? "")),
+      /Do NOT promise|Do NOT say you are looking into it/i.test(String(result["next"] ?? "")),
+      String(result["next"] ?? "").slice(0, 90),
     );
   }
 
-  console.log("\n6 · a build that never started is not polled forever");
+  console.log("\n10 · a build that never started is not polled forever");
   {
     const sessionId = await freshSession();
     const tools = buildTools({ sessionId, uid: UID, appId: null });
@@ -225,7 +347,7 @@ try {
     );
   }
 
-  console.log("\n7 · Drupal answers with an HTML error page");
+  console.log("\n11 · Drupal answers with an HTML error page");
   {
     const sessionId = await freshSession();
     const facts = await loadFacts(sessionId);

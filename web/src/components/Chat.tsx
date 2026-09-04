@@ -57,6 +57,8 @@ const TOOL_LABELS: Record<string, string> = {
   apply_features: "Switching on your features",
   set_branches: "Saving your locations",
   assemble_app: "Assembling your app",
+  publish_web: "Publishing your web app",
+  check_web: "Checking your web app",
   start_build: "Starting the Android build",
   check_build: "Checking the build",
 };
@@ -67,7 +69,7 @@ const PHASES = [
   { id: "catalog", label: "Menu", hint: "What you sell" },
   { id: "locations", label: "Branches", hint: "Where you are" },
   { id: "assembly", label: "Assembly", hint: "Putting it together" },
-  { id: "build", label: "Build", hint: "Making the app" },
+  { id: "web", label: "Live", hint: "Your app, online" },
 ] as const;
 
 export function Chat({ session }: { session: SessionView }) {

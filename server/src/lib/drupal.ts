@@ -154,6 +154,15 @@ export interface AppPreview {
   catalog: {
     categories: Array<{ name: string; items: Array<{ name: string; price: number | null }> }>;
   };
+  /** What already exists, so a resumed session can adopt rather than duplicate. */
+  branches?: Array<{ id: number; name: string; phone: string }>;
+}
+
+export interface WebStatus {
+  status: "pending" | "running" | "success" | "failed";
+  package: string;
+  url: string;
+  log: string;
 }
 
 export interface FeatureReport {
@@ -245,8 +254,28 @@ export const drupal = {
       { kind, url, name },
     ),
 
+  /**
+   * `pid` and `started` are the point: the endpoint used to answer "started" to
+   * a launch it had no evidence of, so the agent announced a build that was
+   * never running.
+   */
+  androidIdentity: (appId: number) =>
+    call<{
+      package: string;
+      application_id: string;
+      has_google_services: boolean;
+      covers: string[];
+    }>("GET", `/api/v3.0/onboarding/app/${appId}/android`),
+
+  setGoogleServices: (appId: number, googleServices: unknown) =>
+    call<{ written: boolean; application_id: string; covers: string[] }>(
+      "POST",
+      `/api/v3.0/onboarding/app/${appId}/android/firebase`,
+      { google_services: googleServices },
+    ),
+
   build: (appId: number, mode: "debug" | "release" = "debug") =>
-    call<{ package: string; mode: string; log: string }>(
+    call<{ package: string; mode: string; log: string; pid?: number; started?: boolean }>(
       "POST",
       `/api/v3.0/onboarding/app/${appId}/build`,
       { mode },
@@ -254,6 +283,23 @@ export const drupal = {
 
   buildStatus: (appId: number, lines = 60) =>
     call<BuildStatus>("GET", `/api/v3.0/onboarding/app/${appId}/build/log?lines=${lines}`),
+
+  /**
+   * Derives the web bundle from the Android XML and publishes it.
+   *
+   * `started` and `pid` are the point: /api/v1.0/deploy_web answers "started"
+   * to a launch it has no evidence of, and never truncates its log, so it
+   * cannot be polled. This is its v3.0 twin.
+   */
+  publishWeb: (appId: number) =>
+    call<{ package: string; url: string; pid: number; started: boolean; log: string }>(
+      "POST",
+      `/api/v3.0/onboarding/app/${appId}/web`,
+      {},
+    ),
+
+  webLog: (appId: number, lines = 40) =>
+    call<WebStatus>("GET", `/api/v3.0/onboarding/app/${appId}/web/log?lines=${lines}`),
 
   /**
    * A promotional banner. `art_url` is background art only — the name is a

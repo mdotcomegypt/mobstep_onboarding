@@ -34,6 +34,10 @@ export interface MockState {
   themeKeys: Map<number, Record<string, string>>;
   assets: Map<number, Array<{ kind: string; url: string }>>;
   builds: Map<number, { startedAt: number; mode: string }>;
+  /** app id -> when the web publish started. */
+  webPublishes: Map<number, { startedAt: number; count: number }>;
+  /** app id -> package names its google-services.json covers. */
+  googleServices: Map<number, string[]>;
 }
 
 /** How long a "build" takes before it reports success. */
@@ -52,6 +56,8 @@ export async function startDrupalMock(options: {
     themeKeys: new Map(),
     assets: new Map(),
     builds: new Map(),
+    webPublishes: new Map(),
+    googleServices: new Map(),
   };
 
   const app = Fastify({ logger: false, bodyLimit: 16 * 1024 * 1024 });
@@ -141,6 +147,11 @@ export async function startDrupalMock(options: {
         dimens: {},
         strings: { app_name: String(state.apps.get(id)?.["name"] ?? "") },
         catalog: { categories: [], sampled_items: 0 },
+        branches: (state.branches.get(id) ?? []).map((b, i) => ({
+          id: 100 + i,
+          name: String(b["name"] ?? ""),
+          phone: String(b["phone"] ?? ""),
+        })),
       };
     },
   );
@@ -380,6 +391,112 @@ export async function startDrupalMock(options: {
           .code(422)
           .send({ error: `could not fetch ${body.kind}: ${(error as Error).message}` });
       }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/v3.0/onboarding/app/:id/android",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+
+      // App 8888 answers with a Drupal error PAGE rather than JSON — the shape
+      // production actually produced, where a PHP Error escaped the endpoint's
+      // \Exception-only handler and the site's page pipeline replied instead.
+      // It lives on the first endpoint an Android request touches, so the
+      // client's HTML detection is exercised where it would really fire.
+      if (id === 8888) {
+        return reply.code(500).type("text/html").send(
+          '<!DOCTYPE html>\n<html lang="en" dir="ltr">\n<head>\n<meta charset="utf-8" />\n' +
+            '<script async src="https://www.googletagmanager.com/gtag/js?id=G-GBJVZKTF13"></script>\n' +
+            "<title>Error | Mobstep</title>\n</head>\n<body>The website encountered an unexpected error.</body></html>",
+        );
+      }
+
+      if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
+      const pkg = String(state.apps.get(id)?.["package_name"] ?? "");
+      const covers = state.googleServices.get(id) ?? [];
+      return {
+        status: "ok",
+        package: pkg,
+        application_id: `com.core.${pkg}`,
+        has_google_services: covers.includes(`com.core.${pkg}`),
+        covers,
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/v3.0/onboarding/app/:id/android/firebase",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
+      const pkg = String(state.apps.get(id)?.["package_name"] ?? "");
+      const expected = `com.core.${pkg}`;
+
+      const body = request.body as { google_services?: { client?: Array<Record<string, any>> } };
+      const covers = (body.google_services?.client ?? [])
+        .map((c) => c?.["client_info"]?.["android_client_info"]?.["package_name"])
+        .filter(Boolean) as string[];
+
+      // Same refusal the real endpoint makes: a file for another package builds
+      // nothing, and Gradle only says so four minutes later.
+      if (!covers.includes(expected)) {
+        return reply.code(400).send({
+          error: `This file has no client for ${expected}. It covers: ${covers.join(", ") || "nothing"}.`,
+        });
+      }
+      state.googleServices.set(id, covers);
+      return { status: "ok", written: true, application_id: expected, covers };
+    },
+  );
+
+  /** How long a web publish takes. It is a file copy, so: not long. */
+  const WEB_MS = 2_500;
+
+  app.post<{ Params: { id: string } }>(
+    "/api/v3.0/onboarding/app/:id/web",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
+
+      const previous = state.webPublishes.get(id);
+      state.webPublishes.set(id, { startedAt: Date.now(), count: (previous?.count ?? 0) + 1 });
+
+      const pkg = String(state.apps.get(id)?.["package_name"] ?? "");
+      return {
+        status: "ok",
+        package: pkg,
+        url: `https://${pkg}.mobstep.com`,
+        pid: 4242,
+        started: true,
+        log: `/sites/default/files/projects/${pkg}/development/web_log.txt`,
+      };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/api/v3.0/onboarding/app/:id/web/log",
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      if (!state.apps.has(id)) return reply.code(404).send({ error: "no such app" });
+
+      const pkg = String(state.apps.get(id)?.["package_name"] ?? "");
+      const url = `https://${pkg}.mobstep.com`;
+      const publish = state.webPublishes.get(id);
+
+      // No publish yet is `pending`, not `running` — the same distinction the
+      // Android log endpoint makes, and for the same reason: a thing that never
+      // started must not be polled forever.
+      if (!publish) return { status: "pending", package: pkg, url, log: "" };
+
+      const done = Date.now() - publish.startedAt >= WEB_MS;
+      const lines = [
+        `[web] publishing ${pkg} (#${id})`,
+        "[web] app_style.css, config.json, placements, locales",
+        "[web] copying into the Next site",
+        ...(done ? ["[web] domain map updated", "SUCCESS"] : []),
+      ];
+      return { status: done ? "success" : "running", package: pkg, url, log: lines.join("\n") };
     },
   );
 

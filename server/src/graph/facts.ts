@@ -31,6 +31,18 @@ function withDefaults(stored: Partial<OnboardingFacts> | null): OnboardingFacts 
     artwork: { ...base.artwork, ...stored.artwork },
     catalog: { ...base.catalog, ...stored.catalog },
     locations: { ...base.locations, ...stored.locations },
+    // Nested one level deeper than the rest: a shallow merge would replace the
+    // whole step map the first time any step is recorded, which would lose the
+    // very history it exists to keep.
+    web: { ...base.web, ...stored.web },
+    android: { ...base.android, ...stored.android },
+    assembly: {
+      ...base.assembly,
+      ...stored.assembly,
+      steps: { ...base.assembly.steps, ...stored.assembly?.steps },
+      branches: stored.assembly?.branches ?? base.assembly.branches,
+      categories: stored.assembly?.categories ?? base.assembly.categories,
+    },
   };
 }
 

@@ -47,14 +47,24 @@ export function AppPreview({
   }, [appId, facts?.categories.length, facts?.placeholderUrl]);
 
   const tokens = live?.live?.tokens ?? {};
+
+  // The keys are the raw Android resource names — `design_system_brand`, not
+  // `brand`. Reading the short form meant this branch never once fired and the
+  // pane always fell back to the chosen palette, so a theme that failed to
+  // apply still looked applied.
+  const token = (name: string): string | undefined => {
+    const value = tokens[`design_system_${name}`];
+    return value?.startsWith("#") ? value : undefined;
+  };
+
   const ctx: BlockContext = {
-    // Live tokens win: once the app exists, its own colours.xml is the truth,
+    // Live values win: once the app exists, its own colours.xml is the truth,
     // and a palette chosen but not yet applied would be a lie about the build.
-    brand: tokens["brand"] ?? facts?.palette?.brand ?? "#3d5afe",
-    onBrand: tokens["on_brand"] ?? facts?.palette?.onBrand ?? "#ffffff",
-    surface: tokens["surface"] ?? facts?.palette?.surface ?? "#ffffff",
-    onSurface: tokens["on_surface"] ?? facts?.palette?.onSurface ?? "#1a1d23",
-    border: tokens["border"] ?? facts?.palette?.border ?? "#e9edf2",
+    brand: token("brand") ?? facts?.palette?.brand ?? "#3d5afe",
+    onBrand: token("on_brand") ?? facts?.palette?.onBrand ?? "#ffffff",
+    surface: token("surface") ?? facts?.palette?.surface ?? "#ffffff",
+    onSurface: token("on_surface") ?? facts?.palette?.onSurface ?? "#1a1d23",
+    border: token("border") ?? facts?.palette?.border ?? "#e9edf2",
 
     shopName: live?.live?.strings["app_name"] ?? facts?.name ?? "Your shop",
     logoUrl: facts?.logoUrl ?? null,
@@ -71,13 +81,19 @@ export function AppPreview({
     live?.live?.screens["product_catalog"] ?? PROJECTED_HOME;
 
   const totalItems = (facts?.categories ?? []).reduce((n, c) => n + c.total, 0);
-  const isLive = live?.stage === "live";
+
+  // Three states, and the pane says which it is in. A mock that claims to be
+  // the real thing is worse than no preview, because the owner stops checking.
+  const web = live?.web;
+  const published = web?.status === "live" && web.url ? web.url : null;
+  const mode: "preview" | "publishing" | "live" =
+    published ? "live" : web?.status === "publishing" ? "publishing" : "preview";
 
   return (
     <aside className="preview" aria-label="Preview of your app">
       <div className="preview-head">
-        <span className={`preview-label${isLive ? " is-live" : ""}`}>
-          {isLive ? "Live" : "Preview"}
+        <span className={`preview-label${mode === "live" ? " is-live" : ""}`}>
+          {mode === "live" ? (web?.stale ? "Live · updating" : "Live") : mode === "publishing" ? "Publishing…" : "Preview"}
           {appId && <em>#{appId}</em>}
         </span>
         {totalItems > 0 && (
@@ -98,16 +114,40 @@ export function AppPreview({
       </div>
 
       <p className="preview-mode">
-        {isLive
-          ? "Read from your app's own configuration."
-          : "What your app will look like. It goes live once it's built."}
+        {published ? (
+          <a href={published} target="_blank" rel="noreferrer">
+            {published.replace(/^https:\/\//, "")} ↗
+          </a>
+        ) : mode === "publishing" ? (
+          "Going live now…"
+        ) : (
+          "What your app will look like. It goes live once it's built."
+        )}
       </p>
 
       <div className="phone">
         <span className="phone-notch" aria-hidden="true" />
         <div className="phone-screen">
-          <AppBar config={config} ctx={ctx} />
-          <Screen config={config} ctx={ctx} />
+          {published ? (
+            /* The real shop, not a rendering of one. It already lays itself out
+               as a phone column below 451px, and an iframe is the only container
+               where that viewport media query resolves against the frame rather
+               than the whole browser window. `key` forces a reload when a
+               re-publish lands. */
+            <iframe
+              key={`${published}-${String(web?.stale)}`}
+              className="phone-live"
+              src={published}
+              title="Your live app"
+              referrerPolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-forms"
+            />
+          ) : (
+            <>
+              <AppBar config={config} ctx={ctx} />
+              <Screen config={config} ctx={ctx} />
+            </>
+          )}
         </div>
       </div>
 

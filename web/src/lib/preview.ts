@@ -20,6 +20,13 @@ export interface LivePreview {
     tokens: Record<string, string>;
     strings: Record<string, string>;
   } | null;
+  /** The merchant's published web app, when there is one. */
+  web?: {
+    url: string | null;
+    status: "none" | "publishing" | "live" | "failed";
+    /** Something has changed since the last publish. */
+    stale: boolean;
+  };
   note?: string;
 }
 
@@ -39,6 +46,7 @@ export async function loadPreview(): Promise<LivePreview | null> {
         tokens: Record<string, string>;
         strings: Record<string, string>;
       } | null;
+      web?: { url: string | null; status: "none"|"publishing"|"live"|"failed"; stale: boolean };
       note?: string;
     };
 
@@ -55,6 +63,7 @@ export async function loadPreview(): Promise<LivePreview | null> {
             strings: body.live.strings ?? {},
           }
         : null,
+      ...(body.web ? { web: body.web } : {}),
       ...(body.note ? { note: body.note } : {}),
     };
   } catch {

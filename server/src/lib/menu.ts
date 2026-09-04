@@ -170,6 +170,51 @@ async function tidySections(
   const keep = plan.keep ?? [];
   if (keep.length === 0) return categories;
 
+  // Refuse a plan that merges too hard.
+  //
+  // This pass exists to fix three specific mistakes — the shop's name read as a
+  // section, one heading printed in two languages, an add-on strip — and none
+  // of them merges more than a couple of sections into one. Asked to tidy, the
+  // model has instead collapsed a whole menu into three sections, with sixty
+  // unrelated items under "Manakeesh". That is far worse than the duplicate it
+  // was fixing: the owner loses the structure of their own menu.
+  //
+  // So the shape of the plan is checked, not just its parts.
+  // Clamp rather than reject.
+  //
+  // Throwing the whole plan away also throws away the fixes that were right —
+  // on the Rosto menu the model proposed collapsing nine sections into four,
+  // and refusing it outright left BOTH the duplicated "Manakeesh"/"المناقيش"
+  // and the shop's own name standing as sections. Keeping the first two merges
+  // per section keeps the legitimate ones (a duplicate heading absorbs exactly
+  // one; an add-on strip at most two) and drops the rest.
+  const MAX_MERGES_PER_SECTION = 2;
+  const overreach = keep.filter((entry) => (entry.mergeFrom?.length ?? 0) > MAX_MERGES_PER_SECTION);
+
+  if (overreach.length > 0) {
+    trace("menu.tidy_clamped", {
+      sections: overreach.length,
+      biggest: Math.max(...overreach.map((e) => e.mergeFrom?.length ?? 0)),
+    });
+    for (const entry of keep) {
+      if ((entry.mergeFrom?.length ?? 0) > MAX_MERGES_PER_SECTION) {
+        entry.mergeFrom = (entry.mergeFrom ?? []).slice(0, MAX_MERGES_PER_SECTION);
+      }
+    }
+  }
+
+  // Anything a clamped plan no longer merges is simply not in `keep`, and the
+  // reconciliation below already keeps unclaimed sections rather than losing
+  // them — so the only remaining risk is a plan that was aggressive everywhere
+  // at once. That one is still refused outright.
+  const survivors = keep.length + Math.max(0, categories.length - keep.length -
+    keep.reduce((n, e) => n + (e.mergeFrom?.length ?? 0), 0) - (plan.drop ?? []).length);
+
+  if (survivors < Math.ceil(categories.length * 0.5)) {
+    trace("menu.tidy_rejected", { from: categories.length, to: survivors });
+    return categories;
+  }
+
   const used = new Set<number>();
   const tidied: CatalogCategory[] = [];
 

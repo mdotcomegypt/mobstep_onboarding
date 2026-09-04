@@ -11,6 +11,7 @@ export type Phase =
   | "catalog"
   | "locations"
   | "assembly"
+  | "web"
   | "build"
   | "done";
 
@@ -77,6 +78,82 @@ export interface Artwork {
   logoOptions: string[];
 }
 
+/**
+ * What assembly has actually managed to do.
+ *
+ * Assembly is six calls to Drupal, any of which can fail on its own. The old
+ * code recorded one fact — `appId` — and treated it as "assembled", so a run
+ * that created the app row and then lost every later call left a session that
+ * could never be repaired: the next attempt saw `appId` and returned "already
+ * assembled" without touching anything. That is exactly how app 965 ended up
+ * with a name and nothing else.
+ *
+ * So each step records itself. A step re-runs when it has not succeeded, or
+ * when the thing it was built from has changed underneath it.
+ */
+export type AssemblyStep = "app" | "theme" | "assets" | "features" | "branches" | "catalog";
+
+export type StepStatus =
+  | "done"
+  /**
+   * Believed complete, but we did not do it and hold no ids.
+   *
+   * Sessions that predate this ledger have an app in Drupal and no record of
+   * how it got there. Adopting them as `done` would be a lie that risks
+   * re-appending branches; `adopted` says "leave this alone" without claiming
+   * knowledge we do not have.
+   */
+  | "adopted"
+  | "failed"
+  /** Nothing to do — no palette, no logo, no branches. */
+  | "skipped";
+
+export interface StepRecord {
+  status: StepStatus;
+  at: string;
+  /** Digest of the input it last ran against; a change means re-run. */
+  digest?: string;
+  error?: string;
+  attempts: number;
+}
+
+export interface AssemblyState {
+  steps: Partial<Record<AssemblyStep, StepRecord>>;
+  /**
+   * Server ids by name, because createBranches and createCatalog APPEND.
+   * Converging against these is what stops a retry duplicating a shop's
+   * branches, which is worse than not retrying at all.
+   */
+  branches: Array<{ name: string; id: number }>;
+  categories: Array<{ name: string; id: number; items: number }>;
+}
+
+/**
+ * The published web app.
+ *
+ * `revision` is bumped by every tool that changes something Drupal renders, and
+ * compared against `publishedRevision` to decide whether a re-publish would do
+ * anything. Publishing is a file copy, so the cost of an unnecessary one is
+ * nothing — but the cost of a MISSED one is the owner looking at yesterday's
+ * app and believing it.
+ */
+export interface WebState {
+  revision: number;
+  publishedRevision?: number;
+  url?: string;
+  status: "none" | "publishing" | "live" | "failed";
+  at?: string;
+  error?: string;
+}
+
+/** Only touched when an owner actually asks for an APK. */
+export interface AndroidState {
+  requested: boolean;
+  applicationId?: string;
+  firebaseAppId?: string;
+  registeredAt?: string;
+}
+
 export interface OnboardingFacts {
   business: BusinessFacts;
   brand: {
@@ -94,6 +171,9 @@ export interface OnboardingFacts {
    * and logs nothing.
    */
   features: string[];
+  assembly: AssemblyState;
+  web: WebState;
+  android: AndroidState;
   catalog: CatalogDraft;
   locations: { branches: BranchDraft[] };
   appId?: number;
@@ -108,6 +188,9 @@ export const emptyFacts = (): OnboardingFacts => ({
   brand: { suggestions: [] },
   artwork: { logoOptions: [] },
   features: [],
+  assembly: { steps: {}, branches: [], categories: [] },
+  web: { revision: 0, status: "none" },
+  android: { requested: false },
   catalog: { categories: [] },
   locations: { branches: [] },
   phase: "discovery",
